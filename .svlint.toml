@@ -1,0 +1,10 @@
+[rules]
+generate_case_with_label=false
+generate_if_with_label=false
+generate_for_with_label=false
+prefix_inout=false
+prefix_input=false
+prefix_output=false
+uppercamelcase_interface=false
+uppercamelcase_module=false
+lowercamelcase_package=false
