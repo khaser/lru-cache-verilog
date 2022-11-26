@@ -13,15 +13,6 @@ parameter addr2_bus_size = 2;
 
 parameter _SEED = 225526;
 
-logic clk = 0;
-task automatic tick(int times = 1);
-    while (times > 0) begin
-        clk <= ~clk;
-        #1;
-        times -= 1;
-    end
-endtask
-
 typedef enum logic[1:0] {
    C2_NOP=2'b00,
    C2_RESPONSE=2'b01,

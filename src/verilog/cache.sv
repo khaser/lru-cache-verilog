@@ -1,5 +1,9 @@
+`ifndef CACHE_GUARD
+`define CACHE_GUARD
+
 `include "parameters.sv"
 `include "mem.sv"
+`include "clock.sv"
 
 module Cache 
     #(
@@ -205,7 +209,7 @@ module Cache
 endmodule
 
 module CacheTestbench;
-    logic                                 reset=0, c_dump=0, m_dump=0;
+    logic                                 clk, reset=0, c_dump=0, m_dump=0;
     wire[addr1_bus_size*BITS_IN_BYTE-1:0] addr_cpu_w;
     wire[data1_bus_size*BITS_IN_BYTE-1:0] data_cpu_w;
     wire[2:0]                             cmd_cpu_w ;
@@ -220,19 +224,17 @@ module CacheTestbench;
     assign addr_cpu_w = addr_cpu;
     assign data_cpu_w = owner_cpu ? data_cpu : {data1_bus_size*BITS_IN_BYTE{1'bz}};
     assign cmd_cpu_w = owner_cpu ? cmd_cpu : 3'bzzz;
-
-    Memory mem (clk, reset, m_dump, addr_mem_w, data_mem_w, cmd_mem_w);
+    
+    Clock cloker(clk);
+    Memory mem(clk, reset, m_dump, addr_mem_w, data_mem_w, cmd_mem_w);
     Cache cache(clk, reset, c_dump, addr_cpu_w, data_cpu_w, cmd_cpu_w, addr_mem_w, data_mem_w, cmd_mem_w);
 
     initial begin
-    fork 
-        forever tick();
-    begin
         $display("Start cache testing");
         /* $monitor("%t, cpu=%d, mem=%d", $time, cmd_cpu_w, cmd_mem_w); */
-        tick(10);
+        #10;
         reset <= 1;
-        tick(10);
+        #10;
 
         @(posedge clk);
         addr_cpu <= 16'b0000000110011011;
@@ -263,7 +265,7 @@ module CacheTestbench;
         @(posedge clk);
         cmd_cpu <= C1_NOP;
 
-        tick(100);
+        #100;
 
         @(posedge clk);
         cmd_cpu <= C1_READ32;
@@ -273,10 +275,9 @@ module CacheTestbench;
         @(posedge clk);
         owner_cpu <= 0;
         $monitor("data mon: %b", data_cpu_w);
-        tick(200);
+        #200;
         $display("Finish cache testing");
         $finish;
     end
-    join
-    end
 endmodule
+`endif

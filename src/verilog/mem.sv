@@ -1,4 +1,8 @@
+`ifndef MEMORY_GUARD
+`define MEMORY_GUARD
+
 `include "parameters.sv"
+`include "clock.sv"
 
 module Memory
     #(
@@ -71,7 +75,7 @@ endmodule
 
 module MemoryTestbench;
 
-    logic reset = 0, m_dump = 0;
+    logic reset = 0, m_dump = 0, clk;
     wire[addr2_bus_size*BITS_IN_BYTE-1:0] addr_w;
     wire[data2_bus_size*BITS_IN_BYTE-1:0] data_w;
     wire[1:0] cmd_w;
@@ -80,7 +84,8 @@ module MemoryTestbench;
     logic[data2_bus_size*BITS_IN_BYTE-1:0] data;
     bit owner = 1;
 
-    Memory #(64) mem (clk, reset, m_dump, addr_w, data_w, cmd_w);
+    Clock clock(clk);
+    Memory #(64) mem(clk, reset, m_dump, addr_w, data_w, cmd_w);
 
     assign addr_w = addr;
     assign data_w = owner ? data : {data2_bus_size*BITS_IN_BYTE{1'bz}};
@@ -121,23 +126,19 @@ module MemoryTestbench;
     logic[0 :+ cache_line_size * BITS_IN_BYTE] buff;
 
     initial begin
-    fork 
-        forever tick();
-    begin
-        /* $display("Start memory testing"); */
-        /* reset <= 1; */
-        /* tick(); */
-        /* reset <= 0; */
-        /* tick(); */
-        /* run_write(0, 1 << 16 + 1 << 8); */
-        /* tick(); */
-        /* run_read(0, buff); */
-        /* tick(); */
-        /* run_write(3, buff); */
-        /* tick(); */
-        /* $display("Finish memory testing"); */
-        /* $finish; */
-    end
-    join
+        $display("Start memory testing");
+        reset <= 1;
+        #1;
+        reset <= 0;
+        #1;
+        run_write(0, 1 << 16 + 1 << 8);
+        #1;
+        run_read(0, buff);
+        #1;
+        run_write(3, buff);
+        #2;
+        $display("Finish memory testing");
+        $finish;
     end
 endmodule
+`endif 
