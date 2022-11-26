@@ -23,7 +23,7 @@ module Cache
     bit owner_cpu = 0;
     logic[data1_bus_size*BITS_IN_BYTE-1:0] data_cpu;
     logic[2:0] cmd_cpu;
-    assign data_cpu_w = owner_cpu ? cmd_cpu : {data1_bus_size*BITS_IN_BYTE{1'bz}};
+    assign data_cpu_w = owner_cpu ? data_cpu : {data1_bus_size*BITS_IN_BYTE{1'bz}};
     assign cmd_cpu_w = owner_cpu ? cmd_cpu : 3'bzzz;
 
     bit owner_mem = 1;
@@ -76,23 +76,17 @@ module Cache
     cacheAddr curAddr;
 
     always @(negedge clk) begin
-        if (cmd_cpu_w == C1_WRITE8 || cmd_cpu_w == C1_WRITE16 || cmd_cpu_w == C1_WRITE32) begin
+        if (owner_cpu == 0 && (cmd_cpu_w == C1_WRITE8 || cmd_cpu_w == C1_WRITE16 || cmd_cpu_w == C1_WRITE32)) begin
             // READ 1-ST
             action_word <= bytesCntFromCmd(cmd_cpu_w);
             {curAddr.tag, curAddr.set} <= addr_cpu_w;
             // READ 2-ND
             @(negedge clk);
             curAddr.offset = addr_cpu_w;
-            $display("tag %d set %d offset %d", curAddr.tag, curAddr.set, curAddr.offset);
+            $display("write tag %d set %d offset %d", curAddr.tag, curAddr.set, curAddr.offset);
 
             // SEARCHING LINE
-            it = -1;
-            for (i = curAddr.set * cache_way; i < curAddr.set * cache_way + cache_way; ++i) begin
-                if (lines[i].valid && lines[i].tag == curAddr.tag)
-                    it = i;
-                if (!lines[i].valid && it == -1) 
-                    it = i;
-            end
+            it = search_by_addr_or_empty(curAddr, lines);
             buff <= (it != -1) ? lines[it] : 0;
 
             // READ DATA
@@ -103,51 +97,110 @@ module Cache
                 @(negedge clk);
             end
 
-            $display("BEFORE\nvalid: %d, dirty: %d, tag: %d", lines[it].valid, lines[it].dirty, lines[it].tag);
-            $display("data: %b", lines[it].data);
+            /* $display("BEFORE\nvalid: %d, dirty: %d, tag: %d it %d", lines[it].valid, lines[it].dirty, lines[it].tag, it); */
+            /* $display("data: %b", lines[it].data); */
 
             if (it == -1) begin
-                purge_line(curAddr.set, lines, it);
+                it = find_lru(curAddr.set, lines);
+                if (lines[it].dirty)
+                    run_mem_write({lines[it].tag, curAddr.set}, lines[it]);
             end 
 
-            $display("it %d, buff %b", it, buff);
-
             lines[it] <= {1'b1, 1'b1, $time, curAddr.tag, buff};
+
+            /* tick(); */
             /* $display("AFTER\n time: %t, valid: %d, dirty: %d, tag: %d", $time, lines[it].valid, lines[it].dirty, lines[it].tag); */
             /* $display("data: %b", lines[it].data); */
         end
     end
 
-    task automatic purge_line(input logic[cache_set_size-1:0] set, input cacheLine[cache_way * cache_sets_count-1:0] lines, output integer purged_line);
-        integer i;
-        integer it_time = INF;
-        integer it = -1;
+    function int search_by_addr_or_empty(
+            input cacheAddr addr,
+            input cacheLine[cache_way * cache_sets_count-1:0] lines
+        );
+        it = -1;
+        for (i = addr.set * cache_way; i < addr.set * cache_way + cache_way; ++i) begin
+            /* $display("search: %d %b", i, lines[i]); */
+            if (lines[i].valid && lines[i].tag == addr.tag)
+                it = i;
+            if (!lines[i].valid && it == -1) 
+                it = i;
+        end
+        return it;
+    endfunction
+
+    function int find_lru(input logic[cache_set_size-1:0] set, input cacheLine[cache_way * cache_sets_count-1:0] lines);
+        integer it_time;
+        it_time = INF;
+        it = -1;
         for (i = set * cache_way; i < set * cache_way + cache_way; ++i) begin
             if (it_time > lines[i].last_update)
                 it = i;
         end
-        run_mem_write({lines[it].tag, set}, lines[it]);
-        purged_line = it;
-    endtask
+        return it;
+    endfunction
 
-    task run_mem_write(input logic[cache_set_size + cache_tag_size-1:0] addr_, input logic[cache_line_size*BITS_IN_BYTE:0] data_);
+    task run_mem_write(input logic[cache_set_size + cache_tag_size-1:0] addr_, input logic[cache_line_size*BITS_IN_BYTE-1:0] data_);
         @(negedge clk);
         cmd_mem <= C2_WRITE_LINE;
         addr_mem <= addr_;
-        for (it = 0; it <= cache_line_size / data2_bus_size; it += 1) begin
+        for (i = 0; i <= cache_line_size / data2_bus_size; i += 1) begin
             @(posedge clk);
-            data_mem <= data_[it * data2_bus_size * BITS_IN_BYTE +: data2_bus_size * BITS_IN_BYTE];
+            data_mem <= data_[i * data2_bus_size * BITS_IN_BYTE +: data2_bus_size * BITS_IN_BYTE];
         end
         cmd_mem <= C2_NOP;
     endtask
 
-
     always @(negedge clk) begin
-        if (cmd_cpu_w == C1_READ8 || cmd_cpu_w == C1_READ16 || cmd_cpu_w == C1_READ32) begin
-            $display("READ bytes %d", bytesCntFromCmd(cmd_cpu_w));
-            action_word = bytesCntFromCmd(cmd_cpu_w);
+        if (owner_cpu == 0 && (cmd_cpu_w == C1_READ8 || cmd_cpu_w == C1_READ16 || cmd_cpu_w == C1_READ32)) begin
+            // READ 1-ST
+            action_word <= bytesCntFromCmd(cmd_cpu_w);
+            {curAddr.tag, curAddr.set} <= addr_cpu_w;
+            // READ 2-ND
+            @(negedge clk);
+            curAddr.offset = addr_cpu_w;
+            $display("read tag %d set %d offset %d", curAddr.tag, curAddr.set, curAddr.offset);
+
+            it = search_by_addr_or_empty(curAddr, lines);
+
+            if (it == -1) begin
+                it = find_lru(curAddr.set, lines);
+            end
+            if (!lines[it].valid || lines[it].tag != curAddr.tag) begin
+                run_read({curAddr.tag, curAddr.set}, lines[it]);
+            end
+            lines[it] <= {lines[it].valid, lines[it].dirty, $time, lines[it].tag, lines[it].data};
+
+            $display("readed: %b\n", lines[it].data);
+            owner_cpu <= 1;
+            cmd_cpu <= C1_RESPONSE;
+            buff = lines[it];
+            @(negedge clk);
+            for (j = 0; j < action_word; j += data1_bus_size) begin
+                for (i = 0; i + j < action_word && i < data1_bus_size; i++) begin
+                    data_cpu[i * BITS_IN_BYTE +: BITS_IN_BYTE] <= buff[(curAddr.offset + j + i) * BITS_IN_BYTE +: BITS_IN_BYTE];
+                end
+                @(negedge clk);
+            end
+            owner_cpu <= 0;
         end
     end
+
+    task run_read(input logic[cache_set_size + cache_tag_size-1:0] addr_, output logic[cache_line_size*BITS_IN_BYTE-1:0] data_);
+        @(posedge clk);
+        cmd_mem <= C2_READ_LINE;
+        addr_mem <= addr_;
+        @(posedge clk);
+        owner_mem <= 0;
+        wait(cmd_mem_w == C2_RESPONSE);
+        for (it = 0; it < cache_line_size; it += data2_bus_size) begin
+            @(posedge clk);
+            data_[it * BITS_IN_BYTE +: data2_bus_size * BITS_IN_BYTE] <= data_mem_w;
+        end
+        @(posedge clk);
+        owner_mem <= 1;
+        cmd_mem <= C2_NOP;
+    endtask
 
 endmodule
 
@@ -210,6 +263,16 @@ module CacheTestbench;
         @(posedge clk);
         cmd_cpu <= C1_NOP;
 
+        tick(100);
+
+        @(posedge clk);
+        cmd_cpu <= C1_READ32;
+        addr_cpu <= 16'b0000000000000000;
+        @(posedge clk);
+        addr_cpu <= 4'b0000;
+        @(posedge clk);
+        owner_cpu <= 0;
+        $monitor("data mon: %b", data_cpu_w);
         tick(200);
         $display("Finish cache testing");
         $finish;

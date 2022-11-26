@@ -38,5 +38,9 @@ typedef enum logic[2:0] {
     C1_WRITE8=3'b101,
     C1_WRITE16=3'b110,
     C1_WRITE32=3'b111
-} cpu_command_codes;
+} cpu_cache_command_codes;
+
+typedef enum logic[2:0] {
+    C1_RESPONSE=3'b111
+} cache_cpu_command_codes;
 `endif

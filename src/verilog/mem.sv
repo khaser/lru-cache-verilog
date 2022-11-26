@@ -23,10 +23,8 @@ module Memory
     assign data_w = owner ? data : {data2_bus_size*BITS_IN_BYTE{1'bz}};
 
     always @(posedge reset) begin
-        if (reset) begin
-            for (i = 0; i < mem_size; i += 1) begin
-                heap[i] <= $random(SEED)>>16;  
-            end
+        for (i = 0; i < mem_size; i += 1) begin
+            heap[i] <= $random(SEED)>>16;  
         end
     end
 
@@ -49,12 +47,13 @@ module Memory
                 end
                 @(negedge clk);
             end
-            $display("MEMORY GET %b", addr);
+            $display("MEMORY WAS WROTE ON %b", addr);
         end
     end
 
     always @(negedge clk) begin
         if (cmd_w == C2_READ_LINE) begin
+            $display("MEMORY WAS READ ON %b", addr);
             cmd <= C2_RESPONSE;
             owner <= 1;
             for (it = addr * cache_line_size; it < addr * cache_line_size + cache_line_size; it += data2_bus_size) begin
@@ -89,7 +88,7 @@ module MemoryTestbench;
 
     integer it;
 
-    task run_read(input int addr_, output logic[cache_line_size*BITS_IN_BYTE:0] data_);
+    task run_read(input int addr_, output logic[cache_line_size*BITS_IN_BYTE-1:0] data_);
         @(posedge clk);
         owner <= 1;
         cmd <= C2_READ_LINE;
@@ -106,7 +105,7 @@ module MemoryTestbench;
         cmd <= C2_NOP;
     endtask
 
-    task run_write(input int addr_, input logic[cache_line_size*BITS_IN_BYTE:0] data_);
+    task run_write(input int addr_, input logic[cache_line_size*BITS_IN_BYTE-1:0] data_);
         @(negedge clk);
         owner <= 1;
         cmd <= C2_WRITE_LINE;
