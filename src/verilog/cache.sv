@@ -130,14 +130,19 @@ module Cache (
     endfunction
 
     task run_mem_write(input logic[cache_set_size + cache_tag_size-1:0] addr_, input logic[cache_line_size*BITS_IN_BYTE-1:0] data_);
-        @(negedge clk);
+        @(posedge clk);
+        owner_mem <= 1;
         cmd_mem <= C2_WRITE_LINE;
         addr_mem <= addr_;
         for (i = 0; i <= cache_line_size / data2_bus_size; i += 1) begin
-            @(posedge clk);
             data_mem <= data_[i * data2_bus_size * BITS_IN_BYTE +: data2_bus_size * BITS_IN_BYTE];
+            @(posedge clk);
         end
+        owner_mem <= 1;
+        wait(cmd_mem_w == C2_RESPONSE);
+        @(posedge clk);
         cmd_mem <= C2_NOP;
+        owner_mem <= 1;
     endtask
 
     always @(negedge clk) begin
@@ -155,7 +160,7 @@ module Cache (
                 it = find_lru(curAddr.set, lines);
             end
             if (!lines[it].valid || lines[it].tag != curAddr.tag) begin
-                run_read({curAddr.tag, curAddr.set}, lines[it]);
+                run_mem_read({curAddr.tag, curAddr.set}, lines[it]);
             end
             lines[it] <= {lines[it].valid, lines[it].dirty, $time, lines[it].tag, lines[it].data};
 
@@ -172,13 +177,15 @@ module Cache (
         end
     end
 
-    task run_read(input logic[cache_set_size + cache_tag_size-1:0] addr_, output logic[cache_line_size*BITS_IN_BYTE-1:0] data_);
+    task run_mem_read(input logic[cache_set_size + cache_tag_size-1:0] addr_, output logic[cache_line_size*BITS_IN_BYTE-1:0] data_);
         @(posedge clk);
+        owner_mem <= 1;
         cmd_mem <= C2_READ_LINE;
         addr_mem <= addr_;
         @(posedge clk);
         owner_mem <= 0;
         wait(cmd_mem_w == C2_RESPONSE);
+        @(posedge clk);
         for (it = 0; it < cache_line_size; it += data2_bus_size) begin
             data_[it * BITS_IN_BYTE +: data2_bus_size * BITS_IN_BYTE] <= data_mem_w;
             @(posedge clk);
@@ -186,7 +193,7 @@ module Cache (
         owner_mem <= 1;
         cmd_mem <= C2_NOP;
     endtask
-
+    
 endmodule
 
 module CacheTestbench;
@@ -280,40 +287,11 @@ module CacheTestbench;
     logic[32:0] test_payload = 32'b10011001111011101111111111111111;
 
     initial begin
-        /* $monitor("%t, cpu=%d, mem=%d", $time, cmd_cpu_w, cmd_mem_w); */
         reset <= 1;
         #1;
         reset <= 0;
         #1;
         
-        /* @(posedge clk); */
-        /* addr_cpu <= 16'b0100000110011011; */
-        /* cmd_cpu <= C1_WRITE8; */
-        /* @(posedge clk); */
-        /* addr_cpu <= 4'b0000; */
-        /* data_cpu <= 8'b10011001; */
-        /* @(posedge clk); */
-        /* cmd_cpu <= C1_NOP; */
-
-        /* @(posedge clk); */
-        /* addr_cpu <= 16'b0110000110011011; */
-        /* cmd_cpu <= C1_WRITE8; */
-        /* @(posedge clk); */
-        /* addr_cpu <= 4'b0000; */
-        /* data_cpu <= 8'b11100111; */
-        /* @(posedge clk); */
-        /* cmd_cpu <= C1_NOP; */
-
-        /* #100; */
-
-        /* @(posedge clk); */
-        /* cmd_cpu <= C1_READ32; */
-        /* addr_cpu <= 16'b0000000000000000; */
-        /* @(posedge clk); */
-        /* addr_cpu <= 4'b0000; */
-        /* @(posedge clk); */
-        /* owner_cpu <= 0; */
-
         begin : TEST_CORRECT
             run_write(test_addr, C1_WRITE32, test_payload);
             run_read(test_addr, C1_READ32, buff);
