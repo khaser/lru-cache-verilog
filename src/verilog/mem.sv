@@ -51,14 +51,19 @@ module Memory
                 end
                 @(negedge clk);
             end
-            /* $display("MEMORY WAS WROTE ON %b", addr); */
+            #(mem_feedback_time - 2 * cache_line_size / data2_bus_size);
+            @(negedge clk);
+            cmd <= C2_RESPONSE;
+            owner <= 1;
+            @(negedge clk);
+            owner <= 0;
         end
     end
 
     always @(negedge clk) begin
         if (cmd_w == C2_READ_LINE) begin
-            /* $display("MEMORY WAS READ ON %b", addr); */
-            #99;
+            #(mem_feedback_time);
+            @(negedge clk)
             cmd <= C2_RESPONSE;
             owner <= 1;
             for (it = addr * cache_line_size; it < addr * cache_line_size + cache_line_size; it += data2_bus_size) begin
@@ -93,40 +98,53 @@ module MemoryTestbench;
 
     integer it;
 
-    task run_read(input int addr_, output logic[cache_line_size*BITS_IN_BYTE-1:0] data_);
+    task run_read(input int addr_, output logic[cache_line_size*BITS_IN_BYTE-1:0] data_, output longint timing);
+        longint first_request;
         @(posedge clk);
+        first_request <= $time + 1;
         owner <= 1;
         cmd <= C2_READ_LINE;
         addr <= addr_;
         @(posedge clk);
         owner <= 0;
         wait(cmd_w == C2_RESPONSE);
+        timing <= $time - first_request;
+        @(posedge clk);
         for (it = 0; it < cache_line_size; it += data2_bus_size) begin
             data_[it * BITS_IN_BYTE +: data2_bus_size * BITS_IN_BYTE] <= data_w;
             @(posedge clk);
         end
         owner <= 1;
         cmd <= C2_NOP;
-        #1;
     endtask
 
-    task run_write(input int addr_, input logic[cache_line_size*BITS_IN_BYTE-1:0] data_);
+    task run_write(input int addr_, input logic[cache_line_size*BITS_IN_BYTE-1:0] data_, output longint timing);
+        longint first_request;
         @(posedge clk);
+        first_request <= $time + 1;
         owner <= 1;
         cmd <= C2_WRITE_LINE;
         addr <= addr_;
-        for (it = 0; it <= cache_line_size / data2_bus_size; it += 1) begin
+        for (it = 0; it < cache_line_size / data2_bus_size; it += 1) begin
             data <= data_[it * data2_bus_size * BITS_IN_BYTE +: data2_bus_size * BITS_IN_BYTE];
             @(posedge clk);
         end
-        owner <= 1;
+        owner <= 0;
+        wait(cmd_w == C2_RESPONSE);
+        timing <= $time - first_request;
+        @(posedge clk);
         cmd <= C2_NOP;
-        #1;
+        owner <= 1;
     endtask
 
-    logic[0 :+ cache_line_size * BITS_IN_BYTE] buff_a, buff_b;
-    longint first_request;
-    int test_payload = 1 << 16 + 1 << 8;
+    logic[cache_line_size * BITS_IN_BYTE - 1 : 0] buff_a, buff_b;
+    longint timing = 100;
+    int test_addr = 5;
+    logic[cache_line_size * BITS_IN_BYTE - 1 : 0] test_payload = (1 << 16) + (1 << 8) + 1;
+
+    always @(timing)
+        if (timing != 100)
+            $display("Memory timing error! Expected: %d, Real %d", mem_feedback_time, timing);
 
     initial begin
         reset <= 1;
@@ -134,32 +152,23 @@ module MemoryTestbench;
         reset <= 0;
         #1;
 
-        begin : TEST_CORRECT
-            run_read(0, buff_a);
-            run_write(0, test_payload);
-            run_read(0, buff_b);
+        begin : TEST_ZERO_ADDR
+            run_read(0, buff_a, timing);
+            run_write(0, test_payload, timing);
+            run_read(0, buff_b, timing);
             if (buff_b != test_payload) 
                 $display("Memory correctness unit test failed, real: %b expected: %b", buff_b, test_payload);
-            run_write(5, buff_a);
-            run_read(5, buff_b);
+        end
+
+        begin : CHECK_CUSTOM_ADDR
+            run_write(test_addr, buff_a, timing);
+            run_read(test_addr, buff_b, timing);
             if (buff_a != buff_b) 
                 $display("Memory correctness unit test failed, real: %b expected: %b", buff_b, buff_a);
         end
 
-        begin : TEST_READ_TIMING
-            @(posedge clk);
-            owner <= 1;
-            cmd <= C2_READ_LINE;
-            addr <= 5;
-            first_request <= $time;
-            @(posedge clk);
-            owner <= 0;
-            wait(cmd_w == C2_RESPONSE);
-            if ($time - first_request != mem_feedback_time)
-                $display("Memory read timing test failed, real timing: %t, expected timing: %t", $time - first_request, mem_feedback_time);
-        end
-
         $display("Finish memory testing");
+        $finish;
     end
 endmodule
 `endif 
