@@ -100,6 +100,11 @@ module Cache (
             end 
 
             lines[it] <= {1'b1, 1'b1, $time, curAddr.tag, buff};
+
+            owner_cpu <= 1;
+            cmd_cpu <= C1_RESPONSE;
+            @(negedge clk);
+            owner_cpu <= 0;
         end
     end
 
@@ -255,7 +260,7 @@ module CacheTestbench;
     task run_write(
         input logic[cache_tag_size + cache_offset_size + cache_set_size - 1 : 0] addr,
         input logic[2:0] cmd,
-        input logic[BITS_IN_BYTE*cache_line_size-1:0] data
+        input logic[BITS_IN_BYTE*cache_line_size - 1:0] data
     );
         @(posedge clk);
         cmd_cpu <= cmd;
@@ -268,7 +273,7 @@ module CacheTestbench;
                 data_cpu <= data;
             end
             C1_WRITE32 : begin
-                data_cpu <= data[0 +: data1_bus_size*BITS_IN_BYTE];
+                data_cpu <= data[0 +: data1_bus_size * BITS_IN_BYTE];
                 @(posedge clk);
                 data_cpu <= data[data1_bus_size*BITS_IN_BYTE +: data1_bus_size*BITS_IN_BYTE];
             end
@@ -278,25 +283,44 @@ module CacheTestbench;
             end
         endcase
         @(posedge clk);
-
+        owner_cpu <= 0;
+        wait(cmd_cpu_w == C1_RESPONSE);
+        @(posedge clk);
+        owner_cpu <= 1;
         cmd_cpu <= C1_NOP;
     endtask
 
-    logic[cache_line_size * BITS_IN_BYTE-1:0] buff;
-    logic test_addr = 19'b1010101001001011;
-    logic[32:0] test_payload = 32'b10011001111011101111111111111111;
+    logic[cache_line_size * BITS_IN_BYTE - 1:0] buff;
+    logic test_addr = 19'b1010101001001001;
+    logic[4 * BITS_IN_BYTE:0] test_payload = 32'b10011001111011101111111111111111;
 
     initial begin
         reset <= 1;
         #1;
         reset <= 0;
         #1;
-        
-        begin : TEST_CORRECT
+
+        begin : TEST_SINGLE_READ_WRITE_32
             run_write(test_addr, C1_WRITE32, test_payload);
             run_read(test_addr, C1_READ32, buff);
             if (buff != test_payload) begin
                 $display("Cache correctness unit test failed, real: %b expected: %b", buff, test_payload);
+            end
+        end
+
+        begin : TEST_MULTIPLE_READ_WRITE_16
+            run_write(test_addr, C1_WRITE16, test_payload);
+            run_read(test_addr, C1_READ16, buff);
+            if (buff[0 +: BITS_IN_BYTE * 2] != test_payload[0 +: BITS_IN_BYTE * 2]) begin
+                $display("Cache correctness unit test failed, real: %b expected: %b", buff[0 +: BITS_IN_BYTE * 2], test_payload[0 +: BITS_IN_BYTE * 2]);
+            end
+        end
+
+        begin : TEST_MULTIPLE_READ_WRITE_8
+            run_write(test_addr, C1_WRITE8, test_payload);
+            run_read(test_addr, C1_READ8, buff);
+            if (buff[0 +: BITS_IN_BYTE] != test_payload[0 +: BITS_IN_BYTE]) begin
+                $display("Cache correctness unit test failed, real: %b expected: %b", buff[0 +: BITS_IN_BYTE], test_payload[0 +: BITS_IN_BYTE]);
             end
         end
 
