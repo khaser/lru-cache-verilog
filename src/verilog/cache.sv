@@ -5,14 +5,7 @@
 `include "mem.sv"
 `include "clock.sv"
 
-module Cache 
-    #(
-        parameter cache_way = 2,
-        parameter cache_tag_size = 10,
-        parameter cache_set_size = 5, 
-        parameter cache_offset_size = 4
-    ) 
-    (
+module Cache (
         input  wire                                  clk, reset, dump,
         input  wire[addr1_bus_size*BITS_IN_BYTE-1:0] addr_cpu_w,
         inout  wire[data1_bus_size*BITS_IN_BYTE-1:0] data_cpu_w,
@@ -54,7 +47,7 @@ module Cache
 
     cacheLine[cache_way * cache_sets_count-1:0] lines;
 
-    function int bytesCntFromCmd(logic[2:0] cmd);
+    function int bytes_cnt_from_cmd(logic[2:0] cmd);
         case (cmd & 3'b011) 
             3'b001 : begin
                 return 1;
@@ -82,12 +75,11 @@ module Cache
     always @(negedge clk) begin
         if (owner_cpu == 0 && (cmd_cpu_w == C1_WRITE8 || cmd_cpu_w == C1_WRITE16 || cmd_cpu_w == C1_WRITE32)) begin
             // READ 1-ST
-            action_word <= bytesCntFromCmd(cmd_cpu_w);
+            action_word <= bytes_cnt_from_cmd(cmd_cpu_w);
             {curAddr.tag, curAddr.set} <= addr_cpu_w;
             // READ 2-ND
             @(negedge clk);
             curAddr.offset = addr_cpu_w;
-            $display("write tag %d set %d offset %d", curAddr.tag, curAddr.set, curAddr.offset);
 
             // SEARCHING LINE
             it = search_by_addr_or_empty(curAddr, lines);
@@ -101,9 +93,6 @@ module Cache
                 @(negedge clk);
             end
 
-            /* $display("BEFORE\nvalid: %d, dirty: %d, tag: %d it %d", lines[it].valid, lines[it].dirty, lines[it].tag, it); */
-            /* $display("data: %b", lines[it].data); */
-
             if (it == -1) begin
                 it = find_lru(curAddr.set, lines);
                 if (lines[it].dirty)
@@ -111,10 +100,6 @@ module Cache
             end 
 
             lines[it] <= {1'b1, 1'b1, $time, curAddr.tag, buff};
-
-            /* tick(); */
-            /* $display("AFTER\n time: %t, valid: %d, dirty: %d, tag: %d", $time, lines[it].valid, lines[it].dirty, lines[it].tag); */
-            /* $display("data: %b", lines[it].data); */
         end
     end
 
@@ -158,12 +143,11 @@ module Cache
     always @(negedge clk) begin
         if (owner_cpu == 0 && (cmd_cpu_w == C1_READ8 || cmd_cpu_w == C1_READ16 || cmd_cpu_w == C1_READ32)) begin
             // READ 1-ST
-            action_word <= bytesCntFromCmd(cmd_cpu_w);
+            action_word <= bytes_cnt_from_cmd(cmd_cpu_w);
             {curAddr.tag, curAddr.set} <= addr_cpu_w;
             // READ 2-ND
             @(negedge clk);
             curAddr.offset = addr_cpu_w;
-            $display("read tag %d set %d offset %d", curAddr.tag, curAddr.set, curAddr.offset);
 
             it = search_by_addr_or_empty(curAddr, lines);
 
@@ -175,11 +159,9 @@ module Cache
             end
             lines[it] <= {lines[it].valid, lines[it].dirty, $time, lines[it].tag, lines[it].data};
 
-            $display("readed: %b\n", lines[it].data);
+            buff = lines[it];
             owner_cpu <= 1;
             cmd_cpu <= C1_RESPONSE;
-            buff = lines[it];
-            @(negedge clk);
             for (j = 0; j < action_word; j += data1_bus_size) begin
                 for (i = 0; i + j < action_word && i < data1_bus_size; i++) begin
                     data_cpu[i * BITS_IN_BYTE +: BITS_IN_BYTE] <= buff[(curAddr.offset + j + i) * BITS_IN_BYTE +: BITS_IN_BYTE];
@@ -198,10 +180,9 @@ module Cache
         owner_mem <= 0;
         wait(cmd_mem_w == C2_RESPONSE);
         for (it = 0; it < cache_line_size; it += data2_bus_size) begin
-            @(posedge clk);
             data_[it * BITS_IN_BYTE +: data2_bus_size * BITS_IN_BYTE] <= data_mem_w;
+            @(posedge clk);
         end
-        @(posedge clk);
         owner_mem <= 1;
         cmd_mem <= C2_NOP;
     endtask
@@ -229,54 +210,120 @@ module CacheTestbench;
     Memory mem(clk, reset, m_dump, addr_mem_w, data_mem_w, cmd_mem_w);
     Cache cache(clk, reset, c_dump, addr_cpu_w, data_cpu_w, cmd_cpu_w, addr_mem_w, data_mem_w, cmd_mem_w);
 
-    initial begin
-        $display("Start cache testing");
-        /* $monitor("%t, cpu=%d, mem=%d", $time, cmd_cpu_w, cmd_mem_w); */
-        #10;
-        reset <= 1;
-        #10;
+    task run_read(
+        input logic[cache_tag_size + cache_offset_size + cache_set_size - 1 : 0] addr,
+        input logic[2:0] cmd,
+        output logic[BITS_IN_BYTE*cache_line_size-1:0] data
+    );
+        logic[BITS_IN_BYTE*data1_bus_size-1:0] local_buff;
 
         @(posedge clk);
-        addr_cpu <= 16'b0000000110011011;
-        cmd_cpu <= C1_WRITE32;
+        cmd_cpu <= cmd;
+        addr_cpu <= addr[cache_offset_size +: cache_set_size + cache_tag_size];
         @(posedge clk);
-        addr_cpu <= 4'b0010;
-        data_cpu <= 16'b1010101010101010;
-        @(posedge clk);
-        data_cpu <= 16'b1111111100000000;
-        @(posedge clk);
-        cmd_cpu <= C1_NOP;
-
-        @(posedge clk);
-        addr_cpu <= 16'b0100000110011011;
-        cmd_cpu <= C1_WRITE8;
-        @(posedge clk);
-        addr_cpu <= 4'b0000;
-        data_cpu <= 8'b10011001;
-        @(posedge clk);
-        cmd_cpu <= C1_NOP;
-
-        @(posedge clk);
-        addr_cpu <= 16'b0110000110011011;
-        cmd_cpu <= C1_WRITE8;
-        @(posedge clk);
-        addr_cpu <= 4'b0000;
-        data_cpu <= 8'b11100111;
-        @(posedge clk);
-        cmd_cpu <= C1_NOP;
-
-        #100;
-
-        @(posedge clk);
-        cmd_cpu <= C1_READ32;
-        addr_cpu <= 16'b0000000000000000;
-        @(posedge clk);
-        addr_cpu <= 4'b0000;
+        addr_cpu <= addr[0 +: cache_offset_size];
         @(posedge clk);
         owner_cpu <= 0;
-        $monitor("data mon: %b", data_cpu_w);
-        #200;
+        wait(cmd_cpu_w == C1_RESPONSE);
+
+        case (cmd) 
+            C1_READ8, C1_READ16 : begin
+                data <= data_cpu_w;
+            end
+            C1_READ32 : begin
+                local_buff <= data_cpu_w;
+                @(posedge clk);
+                data <= {data_cpu_w[0 +: data1_bus_size*BITS_IN_BYTE], local_buff[0 +: data1_bus_size*BITS_IN_BYTE]};
+            end
+            default : begin
+                $display("Incorrect run_read cmd: %d", cmd);
+                $finish;
+            end
+        endcase
+        @(posedge clk);
+        owner_cpu <= 1;
+        cmd_cpu <= C1_NOP;
+    endtask
+
+    task run_write(
+        input logic[cache_tag_size + cache_offset_size + cache_set_size - 1 : 0] addr,
+        input logic[2:0] cmd,
+        input logic[BITS_IN_BYTE*cache_line_size-1:0] data
+    );
+        @(posedge clk);
+        cmd_cpu <= cmd;
+        addr_cpu <= addr[cache_offset_size +: cache_set_size + cache_tag_size];
+        @(posedge clk);
+        addr_cpu <= addr[0 +: cache_offset_size];
+
+        case (cmd) 
+            C1_WRITE8, C1_WRITE16 : begin
+                data_cpu <= data;
+            end
+            C1_WRITE32 : begin
+                data_cpu <= data[0 +: data1_bus_size*BITS_IN_BYTE];
+                @(posedge clk);
+                data_cpu <= data[data1_bus_size*BITS_IN_BYTE +: data1_bus_size*BITS_IN_BYTE];
+            end
+            default : begin
+                $display("Incorrect run_read cmd: %d", cmd);
+                $finish;
+            end
+        endcase
+        @(posedge clk);
+
+        cmd_cpu <= C1_NOP;
+    endtask
+
+    logic[cache_line_size * BITS_IN_BYTE-1:0] buff;
+    logic test_addr = 19'b1010101001001011;
+    logic[32:0] test_payload = 32'b10011001111011101111111111111111;
+
+    initial begin
+        /* $monitor("%t, cpu=%d, mem=%d", $time, cmd_cpu_w, cmd_mem_w); */
+        reset <= 1;
+        #1;
+        reset <= 0;
+        #1;
+        
+        /* @(posedge clk); */
+        /* addr_cpu <= 16'b0100000110011011; */
+        /* cmd_cpu <= C1_WRITE8; */
+        /* @(posedge clk); */
+        /* addr_cpu <= 4'b0000; */
+        /* data_cpu <= 8'b10011001; */
+        /* @(posedge clk); */
+        /* cmd_cpu <= C1_NOP; */
+
+        /* @(posedge clk); */
+        /* addr_cpu <= 16'b0110000110011011; */
+        /* cmd_cpu <= C1_WRITE8; */
+        /* @(posedge clk); */
+        /* addr_cpu <= 4'b0000; */
+        /* data_cpu <= 8'b11100111; */
+        /* @(posedge clk); */
+        /* cmd_cpu <= C1_NOP; */
+
+        /* #100; */
+
+        /* @(posedge clk); */
+        /* cmd_cpu <= C1_READ32; */
+        /* addr_cpu <= 16'b0000000000000000; */
+        /* @(posedge clk); */
+        /* addr_cpu <= 4'b0000; */
+        /* @(posedge clk); */
+        /* owner_cpu <= 0; */
+
+        begin : TEST_CORRECT
+            run_write(test_addr, C1_WRITE32, test_payload);
+            run_read(test_addr, C1_READ32, buff);
+            if (buff != test_payload) begin
+                $display("Cache correctness unit test failed, real: %b expected: %b", buff, test_payload);
+            end
+        end
+
         $display("Finish cache testing");
+        #100000;
         $finish;
     end
 endmodule

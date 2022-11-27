@@ -4,12 +4,18 @@ parameter BITS_IN_BYTE = 8;
 parameter INF = 1000000000;
 
 parameter cache_line_size = 16;
+parameter cache_way = 2;
+parameter cache_tag_size = 10;
+parameter cache_set_size = 5; 
+parameter cache_offset_size = 4;
 
 parameter addr1_bus_size = 2; 
 parameter data1_bus_size = 2;   
 
 parameter data2_bus_size = 2;  
 parameter addr2_bus_size = 2; 
+
+parameter mem_feedback_time = 100;
 
 parameter _SEED = 225526;
 
