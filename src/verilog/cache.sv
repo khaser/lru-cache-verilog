@@ -72,7 +72,7 @@ module Cache (
     end
 
     integer action_word, it, i, j;
-    logic[cache_line_size * BITS_IN_BYTE-1:0] buff_a, buff_b, buff;
+    logic[cache_line_size * BITS_IN_BYTE-1:0] buff_a, buff_b;
     cacheAddr curAddr;
 
     always @(negedge clk) begin
@@ -118,7 +118,6 @@ module Cache (
             end 
 
             lines[it] <= {1'b1, 1'b1, $time, curAddr.tag, buff_b};
-
 
             owner_cpu <= 1;
             cmd_cpu <= C1_RESPONSE;
@@ -168,6 +167,7 @@ module Cache (
         owner_mem <= 1;
     endtask
 
+    logic[cache_line_size * BITS_IN_BYTE-1:0] buff;
     always @(negedge clk) begin
         if (owner_cpu == 0 && (cmd_cpu_w == C1_READ8 || cmd_cpu_w == C1_READ16 || cmd_cpu_w == C1_READ32)) begin
             // READ 1-ST
@@ -185,12 +185,13 @@ module Cache (
             if (!lines[it].valid || lines[it].tag != curAddr.tag) begin
                 total_misses++;
                 run_mem_read({curAddr.tag, curAddr.set}, buff);
+                lines[it] <= {1'b1, 1'b0, $time, curAddr.tag, buff};
             end else begin
                 total_hits++;
+                #3;
                 buff = lines[it].data;
+                lines[it] <= {lines[it].valid, lines[it].dirty, $time, lines[it].tag, buff};
             end
-
-            lines[it] <= {lines[it].valid, lines[it].dirty, $time, lines[it].tag, buff};
 
             owner_cpu <= 1;
             cmd_cpu <= C1_RESPONSE;
@@ -200,23 +201,24 @@ module Cache (
                 end
                 @(negedge clk);
             end
+
             owner_cpu <= 0;
         end
     end
 
     task run_mem_read(input logic[cache_set_size + cache_tag_size-1:0] addr_, output logic[cache_line_size*BITS_IN_BYTE-1:0] data_);
         /* $monitor("time: %t %b %b %b", $time, cmd_mem, addr_mem, data_mem_w); */
-        @(posedge clk);
+        @(negedge clk);
         owner_mem <= 1;
         cmd_mem <= C2_READ_LINE;
         addr_mem <= addr_;
-        @(posedge clk);
+        @(negedge clk);
         owner_mem <= 0;
         wait(cmd_mem_w == C2_RESPONSE);
-        @(posedge clk);
+        @(negedge clk);
         for (i = 0; i < cache_line_size; i += data2_bus_size) begin
             data_[i * BITS_IN_BYTE +: data2_bus_size * BITS_IN_BYTE] <= data_mem_w;
-            @(posedge clk);
+            @(negedge clk);
         end
         owner_mem <= 1;
         cmd_mem <= C2_NOP;
@@ -249,8 +251,7 @@ module CacheTestbench;
     task run_read(
         input logic[cache_tag_size + cache_offset_size + cache_set_size - 1 : 0] addr,
         input logic[2:0] cmd,
-        output logic[BITS_IN_BYTE*cache_line_size-1:0] data,
-        output longint timing
+        output logic[BITS_IN_BYTE*cache_line_size-1:0] data
     );
         logic[BITS_IN_BYTE*data1_bus_size-1:0] local_buff;
 
@@ -319,7 +320,6 @@ module CacheTestbench;
     logic[cache_line_size * BITS_IN_BYTE - 1:0] buff;
     logic[cache_tag_size + cache_offset_size + cache_set_size - 1 : 0] test_addr = 19'b1111010101001001001;
     logic[4 * BITS_IN_BYTE:0] test_payload = 32'b10011001111011101111111111111111;
-    longint timing;
 
     initial begin
         reset <= 1;
@@ -329,7 +329,7 @@ module CacheTestbench;
 
         begin : TEST_SINGLE_READ_WRITE_32
             run_write(test_addr, C1_WRITE32, test_payload);
-            run_read(test_addr, C1_READ32, buff, timing);
+            run_read(test_addr, C1_READ32, buff);
             if (buff[0 +: BITS_IN_BYTE * 4] != test_payload[0 +: BITS_IN_BYTE * 4]) begin
                 $display("Cache correctness qword unit test failed, real: %b expected: %b",
                     buff[0 +: BITS_IN_BYTE * 4], test_payload[0 +: BITS_IN_BYTE * 4]);
@@ -338,7 +338,7 @@ module CacheTestbench;
 
         begin : TEST_SINGLE_READ_WRITE_16
             run_write(test_addr, C1_WRITE16, test_payload);
-            run_read(test_addr, C1_READ16, buff, timing);
+            run_read(test_addr, C1_READ16, buff);
             if (buff[0 +: BITS_IN_BYTE * 2] != test_payload[0 +: BITS_IN_BYTE * 2]) begin
                 $display("Cache correctness dword unit test failed, real: %b expected: %b",
                     buff[0 +: BITS_IN_BYTE * 2], test_payload[0 +: BITS_IN_BYTE * 2]);
@@ -347,16 +347,20 @@ module CacheTestbench;
 
         begin : TEST_SINGLE_READ_WRITE_8
             run_write(test_addr, C1_WRITE8, test_payload);
-            run_read(test_addr, C1_READ8, buff, timing);
+            run_read(test_addr, C1_READ8, buff);
             if (buff[0 +: BITS_IN_BYTE] != test_payload[0 +: BITS_IN_BYTE]) begin
                 $display("Cache correctness word unit test failed, real: %b expected: %b",
                     buff[0 +: BITS_IN_BYTE], test_payload[0 +: BITS_IN_BYTE]);
             end
         end
 
+        begin : TEST_ONLY_READ
+            run_read(test_addr, C1_READ8, buff);
+            run_read(test_addr, C1_READ16, buff);
+            run_read(test_addr, C1_READ32, buff);
+        end
+
         $display("Finish cache testing\n Total hits: %d, total misses: %d", total_hits, total_misses);
-        #100000;
-        $finish;
     end
 endmodule
 `endif

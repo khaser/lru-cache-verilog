@@ -60,17 +60,17 @@ module Memory
         end
     end
 
-    always @(negedge clk) begin
+    always @(posedge clk) begin
         if (cmd_w == C2_READ_LINE) begin
             #(mem_feedback_time);
-            @(negedge clk)
+            @(posedge clk)
             cmd <= C2_RESPONSE;
             owner <= 1;
             for (it = addr * cache_line_size; it < addr * cache_line_size + cache_line_size; it += data2_bus_size) begin
                 for (byte_in_bus = 0; byte_in_bus < data2_bus_size; byte_in_bus += 1) begin
                     data[byte_in_bus * BITS_IN_BYTE +: BITS_IN_BYTE] <= heap[it + byte_in_bus];
                 end
-                @(negedge clk);
+                @(posedge clk);
             end
             owner <= 0;
         end
@@ -100,19 +100,19 @@ module MemoryTestbench;
 
     task run_read(input int addr_, output logic[cache_line_size*BITS_IN_BYTE-1:0] data_, output longint timing);
         longint first_request;
-        @(posedge clk);
+        @(negedge clk);
         first_request <= $time + 1;
         owner <= 1;
         cmd <= C2_READ_LINE;
         addr <= addr_;
-        @(posedge clk);
+        @(negedge clk);
         owner <= 0;
         wait(cmd_w == C2_RESPONSE);
         timing <= $time - first_request;
-        @(posedge clk);
+        @(negedge clk);
         for (it = 0; it < cache_line_size; it += data2_bus_size) begin
             data_[it * BITS_IN_BYTE +: data2_bus_size * BITS_IN_BYTE] <= data_w;
-            @(posedge clk);
+            @(negedge clk);
         end
         owner <= 1;
         cmd <= C2_NOP;
@@ -168,7 +168,6 @@ module MemoryTestbench;
         end
 
         $display("Finish memory testing");
-        $finish;
     end
 endmodule
 `endif 
