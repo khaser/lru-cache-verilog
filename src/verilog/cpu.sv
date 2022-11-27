@@ -120,29 +120,35 @@ module CpuEmulator;
         reset <= 0;
         pc = c_addr; #1; // init pc
 
-        for (y = 0; y < M; y++) begin #1; // loop
+        #1; // y init;
+        for (y = 0; y < M; y++) begin //#1; // loop
+            #1; // x init;
             for (x = 0; x < N; x++) begin #1; // loop
-                pb = b_addr; #1; // init pb
-                s = 0;  #1; // init s
+                pb =#1 b_addr; // init pb
+                s =#1 0; // init s
+                #1; // k init;
                 for (k = 0; k < K; k++) begin #1; // loop
                     // s += pa[k] * pb[x] begin
                     run_read(pa + k, C1_READ8, wbuff);
                     run_read(pb + x * 2, C1_READ16, dbuff);
-                    qbuff = wbuff * dbuff; #5; // (*)
-                    s += qbuff; #1; // (+=)
+                    qbuff =#5 wbuff * dbuff; // (*)
+                    s =#1 s + qbuff; // (+)
                     // s += pa[k] * pb[x] end
-                    pb += N * 2; #1; // (+=)
+                    pb =#1 pb + N * 2; // (+)
                 end
                 run_write(pc + x * 4, C1_WRITE32, s);
             end
-            pa += K; #1; // (+=)
-            pc += N * 4; #1; // (+=)
+            pa =#1 pa + K; // (+)
+            pc =#1 pc + N * 4; // (+)
             $display("time: %d %t", y, $time);
             $fflush;
         end
         #1; // function exit
         $display("Finish cpu run\n Time: %t\nTotal hits: %d\nTotal misses: %d", $time, total_hits, total_misses);
         $finish;
+        /* Time:        5756380 */
+        /* Total hits:   228080 */
+        /* Total misses:  21520 */
     end
 endmodule
 `endif 

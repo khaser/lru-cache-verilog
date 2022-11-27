@@ -111,6 +111,11 @@ module CacheTestbench;
                 $display("Wrong cache hits! Expected: 30, Found: %d", total_hits);
         end
 
+        begin : TEST_ONLY_READ
+            run_read(test_addr, C1_READ8, buff);
+            run_read(test_addr, C1_READ16, buff);
+            run_read(test_addr, C1_READ32, buff);
+        end
 
         begin : TEST_SINGLE_READ_WRITE_32
             run_write(test_addr, C1_WRITE32, test_payload);
@@ -137,12 +142,6 @@ module CacheTestbench;
                 $display("Cache correctness word unit test failed, real: %b expected: %b",
                     buff[0 +: BITS_IN_BYTE], test_payload[0 +: BITS_IN_BYTE]);
             end
-        end
-
-        begin : TEST_ONLY_READ
-            run_read(test_addr, C1_READ8, buff);
-            run_read(test_addr, C1_READ16, buff);
-            run_read(test_addr, C1_READ32, buff);
         end
 
         $display("Finish cache testing\n Total hits: %d, total misses: %d", total_hits, total_misses);

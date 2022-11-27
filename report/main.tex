@@ -10,6 +10,7 @@
 \usepackage{extarrows}
 \usepackage{import}
 \usepackage{indentfirst}
+\usepackage{caption}
 \usepackage{subcaption}
 \usepackage{hyperref}
 \usepackage{indentfirst}
@@ -33,16 +34,12 @@
 \delimitershortfall-1sp
 \newcommand\abs[1]{\left|#1\right|}
 \definecolor{bg}{rgb}{0.95, 0.95, 0.95}
-\newminted{cpp}{
-fontsize=\footnotesize, bgcolor=bg, breakafter=,
-breaklines, 
-breakautoindent=true,
-breaksymbolleft=\raisebox{0.8ex}{
-\small\reflectbox{\carriagereturn}},
-breaksymbolright=\small\carriagereturn,
-}
+\newminted{cpp}{ fontsize=\scriptsize, bgcolor=bg, breakafter=, breaklines, breakautoindent=true, breaksymbolleft=\raisebox{0.8ex}{ \small\reflectbox{\carriagereturn}}, breaksymbolright=\small\carriagereturn, }
 
-\newmintedfile{cpp}{fontsize=\footnotesize, bgcolor=bg, breaklines, breakafter=,}
+\newmintedfile{cpp}{linenos, fontsize=\scriptsize, bgcolor=bg, breaklines, breakafter=,}
+\newmintedfile{sv}{linenos,fontsize=\scriptsize, bgcolor=bg, breakafter=, breaklines, breakautoindent=true, breaksymbolleft=\raisebox{0.8ex}{ \small\reflectbox{\carriagereturn}}, breaksymbolright=\small\carriagereturn, }
+
+\newenvironment{code}{\captionsetup{type=listing}}{}
 
 \begin{document}
 \begin{tabular}{|p{8cm}|p{3cm}|p{3cm}|}
@@ -71,7 +68,7 @@ Verilog.
 \section*{ Задача }
 Имеется следующее определение глобальных переменных и функций: 
 \begin{listing}[H]
-    \cppfile{listings/task.c}
+    \cppfile[linenos]{listings/task.c}
 \end{listing}
 \begin{itemize}
     \item Сложение, инициализация переменных и переход на новую итерацию цикла, выход из функции занимают 1 такт.
@@ -522,4 +519,66 @@ MISSES: 21520 \\
 TOTAL TIME: 4042224\\
 RATE: 0.913782\\
 }
+Теперь, когда мы знаем за сколько работает кэш, вычислим время
+работы всего остального. 
+\begin{itemize}
+    \item 
+        Один такт на выход из функции.
+    \item 
+        Инициализация переменных, каждая из которых выполняется
+        за один такт. Она явно выполняется в строчках 9, 10, 13, 14. 
+        И неявно в каждом из циклов. Будем считать, что переменные локальные
+        для цикла выделяются заново на каждой итерации внешнего цикла.
+        Тогда суммарное количество инициализаций вычисляется как: 
+        $3 + M + M \cdot N \cdot 3 = 11587$ 
+    \item 
+        Подсчитаем количество тактов на сложение, включив в них
+        такты на смену итерации цикла. 
+        $M \cdot 3+ M \cdot N + M \cdot N \cdot K \cdot 3 = 372672$
+    \item 
+        Количество тактов на умножение: 
+        $M \cdot N \cdot K \cdot 5 = 614400$ 
+\end{itemize}
+Итого дополнительно имеем: $1 + 11587 + 372672 + 614400 = 998660$.
+Тогда итоговое прогнозируемое время работы равно:
+$998660 + 4042224 = 5040884$
+\section*{ Моделирование на языке Verilog }
+\section*{ Воспроизведение задачи на Verilog }
+\section*{ Сравнение полученных результатов }
+\section*{ Листининг кода }
+\subsection*{ Код на C++ для оценки времени работы целиком }
+\begin{code}
+    \cppfile{listings/analize/main.cpp}
+    \caption{main.cpp}
+\end{code}
+\subsection*{ Код на Verilog для симуляции схемы целиком }
+\begin{code}
+    \svfile{listings/verilog/parameters.sv}
+    \caption{parameters.sv}
+\end{code}
+\begin{code}
+    \svfile{listings/verilog/clock.sv}
+    \caption{clock.sv}
+\end{code}
+\begin{code}
+    \svfile{listings/verilog/mem.sv}
+    \caption{mem.sv}
+\end{code}
+\begin{code}
+    \svfile{listings/verilog/cache.sv}
+    \caption{cache.sv}
+\end{code}
+\begin{code}
+    \svfile{listings/verilog/cpu.sv}
+    \caption{cpu.sv}
+\end{code}
+\subsection*{ Код тестирования в среде Verilog }
+\begin{code}
+    \svfile{listings/verilog/mem_testbench.sv}
+    \caption{mem\_testbench.sv}
+\end{code}
+\begin{code}
+    \svfile{listings/verilog/cache_testbench.sv}
+    \caption{cache\_testbench.sv}
+\end{code}
 \end{document}
