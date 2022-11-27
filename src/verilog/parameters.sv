@@ -1,5 +1,6 @@
 `ifndef PARAMETERS_GUARD
 `define PARAMETERS_GUARD
+
 parameter BITS_IN_BYTE = 8;
 parameter INF = 1000000000;
 
@@ -16,6 +17,8 @@ parameter data2_bus_size = 2;
 parameter addr2_bus_size = 2; 
 
 parameter mem_feedback_time = 100;
+parameter cache_hit_time = 6;
+parameter cache_miss_time = 4;
 
 parameter _SEED = 225526;
 
