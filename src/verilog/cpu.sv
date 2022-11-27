@@ -22,10 +22,12 @@ module CpuEmulator;
     assign addr_cpu_w = addr_cpu;
     assign data_cpu_w = owner_cpu ? data_cpu : {data1_bus_size*BITS_IN_BYTE{1'bz}};
     assign cmd_cpu_w = owner_cpu ? cmd_cpu : 3'bzzz;
+
+    integer total_hits, total_misses;
     
     Clock cloker(clk);
     Memory mem(clk, reset, m_dump, addr_mem_w, data_mem_w, cmd_mem_w);
-    Cache cache(clk, reset, c_dump, addr_cpu_w, data_cpu_w, cmd_cpu_w, addr_mem_w, data_mem_w, cmd_mem_w);
+    Cache cache(clk, reset, c_dump, addr_cpu_w, data_cpu_w, cmd_cpu_w, addr_mem_w, data_mem_w, cmd_mem_w, total_hits, total_misses);
 
     task run_read(
         input logic[cache_tag_size + cache_offset_size + cache_set_size - 1 : 0] addr,
@@ -99,17 +101,18 @@ module CpuEmulator;
     localparam M = 64;
     localparam N = 60;
     localparam K = 32;
-    int a_addr = 0;
-    int b_addr = a_addr + M * K;
-    int c_addr = b_addr + K * N * 2;
+    integer a_addr = 0;
+    integer b_addr = a_addr + M * K;
+    integer c_addr = b_addr + K * N * 2;
 
-    int y, x, k;
-    int pa, pb, pc;
-    int s;
+    integer y, x, k;
+    integer pa, pb, pc;
+    integer s;
 
     logic[BITS_IN_BYTE-1:0] wbuff;
     logic[2 * BITS_IN_BYTE-1:0] dbuff;
     logic[4 * BITS_IN_BYTE-1:0] qbuff;
+
 
     initial begin
         reset <= 1;
@@ -121,8 +124,7 @@ module CpuEmulator;
             for (x = 0; x < N; x++) begin #1; // loop
                 pb = b_addr; #1; // init pb
                 s = 0;  #1; // init s
-                for (k = 0; k < K; k++) begin
-                    #1; // loop
+                for (k = 0; k < K; k++) begin #1; // loop
                     // s += pa[k] * pb[x] begin
                     run_read(pa + k, C1_READ8, wbuff);
                     run_read(pb + x * 2, C1_READ16, dbuff);

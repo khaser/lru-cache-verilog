@@ -5,9 +5,6 @@
 `include "mem.sv"
 `include "clock.sv"
 
-integer total_hits = 0;
-integer total_misses = 0;
-
 module Cache (
         input  wire                                  clk, reset, dump,
         input  wire[addr1_bus_size*BITS_IN_BYTE-1:0] addr_cpu_w,
@@ -15,7 +12,9 @@ module Cache (
         inout  wire[2:0]                             cmd_cpu_w,
         output wire[addr2_bus_size*BITS_IN_BYTE-1:0] addr_mem_w,
         inout  wire[data2_bus_size*BITS_IN_BYTE-1:0] data_mem_w,
-        inout  wire[1:0]                             cmd_mem_w
+        inout  wire[1:0]                             cmd_mem_w,
+        output integer total_hits = 0,
+        output integer total_misses = 0
     );
 
     localparam cache_sets_count = 1 << cache_set_size;
@@ -145,8 +144,10 @@ module Cache (
         it_time = INF;
         it = -1;
         for (i = set * cache_way; i < set * cache_way + cache_way; ++i) begin
-            if (it_time > lines[i].last_update)
+            if (it_time > lines[i].last_update) begin
                 it = i;
+                it_time = lines[i].last_update;
+            end
         end
         return it;
     endfunction
@@ -235,6 +236,7 @@ module CacheTestbench;
     wire[addr2_bus_size*BITS_IN_BYTE-1:0] addr_mem_w;
     wire[data2_bus_size*BITS_IN_BYTE-1:0] data_mem_w;
     wire[1:0]                             cmd_mem_w ;
+    integer total_hits, total_misses;
 
     bit owner_cpu = 1;
     logic[2:0] cmd_cpu = C1_NOP;
@@ -246,7 +248,7 @@ module CacheTestbench;
     
     Clock cloker(clk);
     Memory mem(clk, reset, m_dump, addr_mem_w, data_mem_w, cmd_mem_w);
-    Cache cache(clk, reset, c_dump, addr_cpu_w, data_cpu_w, cmd_cpu_w, addr_mem_w, data_mem_w, cmd_mem_w);
+    Cache cache(clk, reset, c_dump, addr_cpu_w, data_cpu_w, cmd_cpu_w, addr_mem_w, data_mem_w, cmd_mem_w, total_hits, total_misses);
 
     task run_read(
         input logic[cache_tag_size + cache_offset_size + cache_set_size - 1 : 0] addr,
@@ -320,12 +322,22 @@ module CacheTestbench;
     logic[cache_line_size * BITS_IN_BYTE - 1:0] buff;
     logic[cache_tag_size + cache_offset_size + cache_set_size - 1 : 0] test_addr = 19'b1111010101001001001;
     logic[4 * BITS_IN_BYTE:0] test_payload = 32'b10011001111011101111111111111111;
+    integer i;
 
     initial begin
         reset <= 1;
         #1;
         reset <= 0;
         #1;
+
+        begin : TEST_CACHE_HITS
+            for (i = 0; i < 32; ++i) begin
+                run_read(i, C1_READ8, buff);
+            end
+            if (total_hits != 30)
+                $display("Wrong cache hits! Expected: 30, Found: %d", total_hits);
+        end
+
 
         begin : TEST_SINGLE_READ_WRITE_32
             run_write(test_addr, C1_WRITE32, test_payload);

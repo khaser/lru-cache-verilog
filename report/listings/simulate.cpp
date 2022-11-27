@@ -4,6 +4,7 @@
 #include <numeric>
 #include <bitset>
 #include <cassert>
+#include <fstream>
 #include <tuple>
 
 using namespace std;
@@ -183,22 +184,25 @@ int main() {
     const int N = 60;
     const int K = 32;
 
-    int8_t*  a = (int8_t*) alloc.allocate(M, K, sizeof(int8_t));  // a[M][K];
-    int16_t* b = (int16_t*)alloc.allocate(K, N, sizeof(int16_t)); // b[K][N];
-    int32_t* c = (int32_t*)alloc.allocate(M, N, sizeof(int32_t)); // c[M][N];
+    int8_t* const a = (int8_t*) alloc.allocate(M, K, sizeof(int8_t));  // a[M][K];
+    int16_t* const b = (int16_t*)alloc.allocate(K, N, sizeof(int16_t)); // b[K][N];
+    int32_t* const c = (int32_t*)alloc.allocate(M, N, sizeof(int32_t)); // c[M][N];
+
+    int8_t* pa = a;
+    int32_t* pc = c;
 
     for (int y = 0; y < M; y++) {
         for (int x = 0; x < N; x++) {
             int16_t* pb = b;
             for (int k = 0; k < K; k++) {
-                cache.read(WORD, (Addr) (a + k));
+                cache.read(WORD, (Addr) (pa + k));
                 cache.read(DWORD, (Addr) (pb + x));
                 pb += N;
             }
-            cache.write(QWORD, (Addr) (c + x));
+            cache.write(QWORD, (Addr) (pc + x));
         }
-        a += K;
-        c += N;
+        pa += K;
+        pc += N;
     }
 
     cout << "HITS: " << cache.get_hits() << "\nMISSES: " << cache.get_misses() << "\nTOTAL TIME: " << cache.get_time() << endl;
