@@ -36,15 +36,17 @@ public:
         lines = vector<CacheLine>(way, CacheLine{line_size});
     }
 
-    bool read(Addr tag, int call) {
+    bool exists(Addr tag) {
+        return find_by_tag(tag) != lines.end();
+    } 
+
+    void read(Addr tag, int call) {
         auto it = find_by_tag(tag);
         if (it != lines.end()) {
             it->last_call = call;
         } else {
-            total_mem_pushes += find_LRO()->dirty;
             *(find_LRO()) = CacheLine {line_size, 1, 0, tag, call};
         }
-        return it != lines.end(); 
     }
 
     void write(Addr tag, int call) {
@@ -103,38 +105,35 @@ public:
     }
 
     void read(Word word, Addr addr) {
-        total_time++;
         calls++;
         auto [tag, set, offset] = split_addr(addr); 
-        if (sets[set].read(tag, calls)) {
+        if (sets[set].exists(tag)) {
             total_hits++;
             total_time += 6; // Cache lag
-            total_time += transfer_lag(word); // Cache -> Cpu
+            total_time += transfer_lag(word) + 1; // Cache -> Cpu
+                                                  // 8-9
         } else {
             total_misses++;
-            total_time += 3;
             total_time += 4 + 100; // Cache + Mem lag
-            total_time += transfer_lag(WORD * line_size); // Mem -> Cache
+            total_time += transfer_lag(WORD * line_size) + 1; // Mem -> Cache
             total_time += transfer_lag(word); // Cache -> Cpu
+                                              // 114-115
         }
+        sets[set].read(tag, calls);
     };
-
-    /* target: 4344220 */
 
     void write(Word word, Addr addr) {
         calls++;
-        total_time++;
         auto [tag, set, offset] = split_addr(addr); 
-        if (sets[set].read(tag, calls)) {
+        if (sets[set].exists(tag)) {
             total_hits++;
             total_time += 6; // Cache lag 
             total_time += 1; // Cache->Cpu response
         } else {
             total_misses++;
-            total_time += 3;
             total_time += 4 + 100;                        // Cache + Mem lag
             total_time += transfer_lag(WORD * line_size); // Mem -> Cache
-            total_time += 1;                              // Cache -> Cpu response
+            total_time += 1; // Cache->Cpu response
         }
         sets[set].write(tag, calls);
     };
@@ -153,7 +152,7 @@ public:
                 return acc + el.getMemPushes();
             }
         );
-        return total_time + total_pushes * (transfer_lag(WORD * line_size) + 1);
+        return total_time + total_pushes * (100 + 1);
     }
 
 private:

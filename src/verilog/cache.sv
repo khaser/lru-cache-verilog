@@ -112,7 +112,7 @@ module Cache (
                 run_mem_read({curAddr.tag, curAddr.set}, buff_b);
             end else begin
                 total_hits++;
-                skip(3);
+                skip(3 + (action_word != 4));
                 buff_b <= lines[it];
             end
 
@@ -124,8 +124,10 @@ module Cache (
             // Purge if needed
             if (it == -1) begin
                 it = find_lru(curAddr.set, lines);
-                if (lines[it].dirty)
+                if (lines[it].dirty) begin
+                    $display("PURGE");
                     run_mem_write({lines[it].tag, curAddr.set}, lines[it]);
+                end
             end 
 
             lines[it] <= {1'b1, 1'b1, total_hits + total_misses, curAddr.tag, buff_b};

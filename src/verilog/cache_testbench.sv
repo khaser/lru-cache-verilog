@@ -49,7 +49,7 @@ module CacheTestbench;
             C1_READ32 : begin
                 local_buff <= data_cpu_w;
                 @(posedge clk);
-                data = {data_cpu_w[0 +: data1_bus_size*BITS_IN_BYTE], local_buff[0 +: data1_bus_size*BITS_IN_BYTE]};
+                data <= {data_cpu_w[0 +: data1_bus_size*BITS_IN_BYTE], local_buff[0 +: data1_bus_size*BITS_IN_BYTE]};
             end
             default : begin
                 $display("Incorrect run_read cmd: %d", cmd);
@@ -96,7 +96,6 @@ module CacheTestbench;
         timing = clk_time - timing;
         owner_cpu <= 1;
         cmd_cpu <= C1_NOP;
-        @(negedge clk); 
     endtask
 
     logic[cache_line_size * BITS_IN_BYTE - 1:0] buff;
@@ -116,7 +115,6 @@ module CacheTestbench;
 
         begin : TEST_CACHE_HITS
             resetCache();
-            run_read(0, C1_READ8, buff, timing);
             if (timing != cache_miss_time) 
                 $display("Cache read-miss timing error! Expected: %d, Real %d", cache_miss_time, timing);
             for (i = 1; i < 32; ++i) begin
@@ -138,6 +136,9 @@ module CacheTestbench;
                 $display("Cache correctness qword unit test failed, real: %b expected: %b",
                     buff[0 +: BITS_IN_BYTE * 4], test_payload[0 +: BITS_IN_BYTE * 4]);
             end
+            run_write(test_addr, C1_WRITE32, test_payload, timing);
+            if (timing != cache_hit_time)
+                $display("Cache write-hit timing error! Expected: %d, Real %d", cache_hit_time, timing);
         end
 
         begin : TEST_SINGLE_READ_WRITE_16
@@ -150,6 +151,9 @@ module CacheTestbench;
                 $display("Cache correctness dword unit test failed, real: %b expected: %b",
                     buff[0 +: BITS_IN_BYTE * 2], test_payload[0 +: BITS_IN_BYTE * 2]);
             end
+            run_write(test_addr, C1_WRITE16, test_payload, timing);
+            if (timing != cache_hit_time)
+                $display("Cache write-hit timing error! Expected: %d, Real %d", cache_hit_time, timing);
         end
 
         begin : TEST_SINGLE_READ_WRITE_8
@@ -160,6 +164,9 @@ module CacheTestbench;
                 $display("Cache correctness word unit test failed, real: %b expected: %b",
                     buff[0 +: BITS_IN_BYTE], test_payload[0 +: BITS_IN_BYTE]);
             end
+            run_write(test_addr, C1_WRITE8, test_payload, timing);
+            if (timing != cache_hit_time)
+                $display("Cache write-hit timing error! Expected: %d, Real %d", cache_hit_time, timing);
         end
 
         $display("Finish cache testing");

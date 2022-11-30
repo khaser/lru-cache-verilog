@@ -37,32 +37,31 @@ module CpuEmulator;
     );
         logic[BITS_IN_BYTE*data1_bus_size-1:0] local_buff;
 
-        @(posedge clk);
+        @(negedge clk);
         cmd_cpu <= cmd;
         addr_cpu <= addr[cache_offset_size +: cache_set_size + cache_tag_size];
-        @(posedge clk);
+        @(negedge clk);
         addr_cpu <= addr[0 +: cache_offset_size];
         @(posedge clk);
         owner_cpu <= 0;
-        wait(cmd_cpu_w == C1_RESPONSE);
-
+        wait(cmd_cpu_w == C1_RESPONSE); // response on posedge!
         case (cmd) 
             C1_READ8, C1_READ16 : begin
-                data <= data_cpu_w;
+                data = data_cpu_w;
             end
             C1_READ32 : begin
                 local_buff <= data_cpu_w;
                 @(posedge clk);
-                data <= {data_cpu_w[0 +: data1_bus_size*BITS_IN_BYTE], local_buff[0 +: data1_bus_size*BITS_IN_BYTE]};
+                data = {data_cpu_w[0 +: data1_bus_size*BITS_IN_BYTE], local_buff[0 +: data1_bus_size*BITS_IN_BYTE]};
             end
             default : begin
                 $display("Incorrect run_read cmd: %d", cmd);
                 $finish;
             end
         endcase
-        @(posedge clk);
         owner_cpu <= 1;
         cmd_cpu <= C1_NOP;
+        @(negedge clk);
     endtask
 
     task run_write(
@@ -70,10 +69,11 @@ module CpuEmulator;
         input logic[2:0] cmd,
         input logic[BITS_IN_BYTE*cache_line_size - 1:0] data
     );
-        @(posedge clk);
+        /* $monitor("time: %t, owner: %b, clk: %b cmd_w: %b addr_w: %b data_w: %b", clk_time, owner_cpu, clk, cmd_cpu_w, addr_cpu_w, data_cpu_w); */
+        @(negedge clk);
         cmd_cpu <= cmd;
         addr_cpu <= addr[cache_offset_size +: cache_set_size + cache_tag_size];
-        @(posedge clk);
+        @(negedge clk);
         addr_cpu <= addr[0 +: cache_offset_size];
 
         case (cmd) 
@@ -82,27 +82,27 @@ module CpuEmulator;
             end
             C1_WRITE32 : begin
                 data_cpu <= data[0 +: data1_bus_size * BITS_IN_BYTE];
-                @(posedge clk);
+                @(negedge clk);
                 data_cpu <= data[data1_bus_size*BITS_IN_BYTE +: data1_bus_size*BITS_IN_BYTE];
             end
             default : begin
-                $display("Incorrect run_read cmd: %d", cmd);
+                $display("Incorrect run_write cmd: %d", cmd);
                 $finish;
             end
         endcase
         @(posedge clk);
         owner_cpu <= 0;
-        @(posedge clk);
+        @(negedge clk); // ???
         wait(cmd_cpu_w == C1_RESPONSE);
-        @(posedge clk);
         owner_cpu <= 1;
         cmd_cpu <= C1_NOP;
     endtask
 
+    integer skipped_time = 0;
     task automatic skip(input longint ticks = 1);
         logic enter_clk = clk;
-        /* while (ticks > 0) begin */
-        while (0) begin
+        skipped_time += ticks;
+        while (ticks > 0) begin
             wait(clk != enter_clk);
             wait(clk == enter_clk);
             ticks--;
@@ -126,9 +126,10 @@ module CpuEmulator;
 
     initial begin
         reset <= 1;
-        skip(); #1;
+        skip();
         reset <= 0;
         skip();
+
         pa = a_addr; skip(); // init pa
         pc = c_addr; skip(); // init pc
 
@@ -156,13 +157,21 @@ module CpuEmulator;
             $fflush;
         end
         skip(); // function exit
-        $display("Finish cpu run\n Time: %t\nTotal hits: %d\nTotal misses: %d", timing, total_hits, total_misses);
+        $display("Finish cpu run");
+        $display("Time: %t", timing);
+        $display("Cache time: %t", timing - skipped_time);
+        $display("Alu time: %t", skipped_time);
+        $display("Total hits: %d", total_hits);
+        $display("Total misses: %d", total_misses);
         $finish;
-        /* Cache time:       4344220 */
-        /* Additional time:   998661 */
-        /* Total time:       5342881 */
-        /* Total hits:        228080 */
-        /* Total misses:       21520 */
+
+        /* Finish cpu run */
+        /* Time:              5272742 */
+        /* Cache time         4274080 */
+        /* Alu time            998662 */
+        /* Total hits:         228080 */
+        /* Total misses:        21520 */
+
     end
 endmodule
 `endif 
