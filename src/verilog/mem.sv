@@ -32,14 +32,24 @@ module Memory
         end
     end
 
+    integer fd;
     always @(posedge dump) begin
-        $display("---Begin Memory dump---");
+        fd = $fopen("mem.dump", "w");
         for (i = 0; i < mem_size; i += 1) begin
-            $display("[%d] %d", i, heap[i]);  
+            $fdisplay(fd, "[%d] %d", i, heap[i]);  
         end
-        $display("---End Memory dump---");
+        $display("Memory has dumped to mem.dump");
+        $fclose(fd);
     end
 
+    task automatic skip(input longint ticks = 1);
+        logic enter_clk = clk;
+        while (ticks > 0) begin
+            wait(clk != enter_clk);
+            wait(clk == enter_clk);
+            ticks--;
+        end
+    endtask
 
     integer it, byte_in_bus;
 
@@ -51,8 +61,8 @@ module Memory
                 end
                 @(negedge clk);
             end
-            #(mem_feedback_time - 2 * cache_line_size / data2_bus_size);
-            @(negedge clk);
+            skip(mem_feedback_time - cache_line_size / data2_bus_size);
+            @(posedge clk);
             cmd <= C2_RESPONSE;
             owner <= 1;
             @(negedge clk);
@@ -62,15 +72,19 @@ module Memory
 
     always @(posedge clk) begin
         if (cmd_w == C2_READ_LINE) begin
-            #(mem_feedback_time);
-            @(posedge clk)
-            cmd <= C2_RESPONSE;
+            cmd <= C2_NOP;
             owner <= 1;
+            skip(mem_feedback_time - 1);
+            @(negedge clk)
+            cmd <= C2_RESPONSE;
             for (it = addr * cache_line_size; it < addr * cache_line_size + cache_line_size; it += data2_bus_size) begin
                 for (byte_in_bus = 0; byte_in_bus < data2_bus_size; byte_in_bus += 1) begin
                     data[byte_in_bus * BITS_IN_BYTE +: BITS_IN_BYTE] <= heap[it + byte_in_bus];
                 end
-                @(posedge clk);
+                if (it + data2_bus_size >= addr * cache_line_size + cache_line_size)
+                    @(posedge clk);
+                else
+                    @(negedge clk);
             end
             owner <= 0;
         end

@@ -36,7 +36,7 @@ module Cache (
     typedef struct packed { 
         logic valid;
         logic dirty;
-        logic[8 * BITS_IN_BYTE-1:0] last_update;
+        integer last_update;
         logic[cache_tag_size-1:0] tag;
         logic[cache_line_size*BITS_IN_BYTE-1:0] data;
     } cacheLine;
@@ -63,8 +63,16 @@ module Cache (
         endcase
     endfunction
 
+    task automatic skip(input longint ticks = 1);
+        logic enter_clk = clk;
+        while (ticks > 0) begin
+            wait(clk != enter_clk);
+            wait(clk == enter_clk);
+            ticks--;
+        end
+    endtask
+
     always @(posedge reset) begin
-        $display("RESET");
         for (i = 0; i < cache_way * cache_sets_count; i += 1) begin
             lines[i] <= 0;
         end
@@ -74,21 +82,23 @@ module Cache (
     logic[cache_line_size * BITS_IN_BYTE-1:0] buff_a, buff_b;
     cacheAddr curAddr;
 
-    always @(negedge clk) begin
+    always @(posedge clk) begin
         if (owner_cpu == 0 && (cmd_cpu_w == C1_WRITE8 || cmd_cpu_w == C1_WRITE16 || cmd_cpu_w == C1_WRITE32)) begin
             // READ 1-ST
             action_word <= bytes_cnt_from_cmd(cmd_cpu_w);
             {curAddr.tag, curAddr.set} <= addr_cpu_w;
             // READ 2-ND
-            @(negedge clk);
+            @(posedge clk);
             curAddr.offset = addr_cpu_w;
-
             // Read data
             for (j = 0; j < action_word; j += data1_bus_size) begin
                 for (i = 0; i + j < action_word && i < data1_bus_size; i++) begin
                     buff_a[(curAddr.offset + j + i) * BITS_IN_BYTE +: BITS_IN_BYTE] <= data_cpu_w[i * BITS_IN_BYTE +: BITS_IN_BYTE];
                 end
-                @(negedge clk);
+                if (j + data1_bus_size >= action_word) 
+                    @(negedge clk);
+                else
+                    @(posedge clk);
             end
             owner_cpu <= 1;
             cmd_cpu <= C1_NOP;
@@ -98,9 +108,11 @@ module Cache (
             // Uploading from memory if needed
             if (it == -1 || !lines[it].valid || lines[it].tag != curAddr.tag) begin
                 total_misses++;
+                skip(action_word != 4);
                 run_mem_read({curAddr.tag, curAddr.set}, buff_b);
             end else begin
                 total_hits++;
+                skip(3);
                 buff_b <= lines[it];
             end
 
@@ -116,11 +128,10 @@ module Cache (
                     run_mem_write({lines[it].tag, curAddr.set}, lines[it]);
             end 
 
-            lines[it] <= {1'b1, 1'b1, $time, curAddr.tag, buff_b};
+            lines[it] <= {1'b1, 1'b1, total_hits + total_misses, curAddr.tag, buff_b};
 
-            owner_cpu <= 1;
             cmd_cpu <= C1_RESPONSE;
-            @(negedge clk);
+            @(posedge clk);
             owner_cpu <= 0;
         end
     end
@@ -169,14 +180,16 @@ module Cache (
     endtask
 
     logic[cache_line_size * BITS_IN_BYTE-1:0] buff;
-    always @(negedge clk) begin
+    always @(posedge clk) begin
         if (owner_cpu == 0 && (cmd_cpu_w == C1_READ8 || cmd_cpu_w == C1_READ16 || cmd_cpu_w == C1_READ32)) begin
             // READ 1-ST
             action_word <= bytes_cnt_from_cmd(cmd_cpu_w);
             {curAddr.tag, curAddr.set} <= addr_cpu_w;
             // READ 2-ND
-            @(negedge clk);
+            @(posedge clk);
             curAddr.offset = addr_cpu_w;
+            owner_cpu <= 1;
+            cmd_cpu <= C1_NOP;
 
             it = search_by_addr_or_empty(curAddr, lines);
 
@@ -185,41 +198,45 @@ module Cache (
             end
             if (!lines[it].valid || lines[it].tag != curAddr.tag) begin
                 total_misses++;
+                skip(2);
                 run_mem_read({curAddr.tag, curAddr.set}, buff);
-                lines[it] <= {1'b1, 1'b0, $time, curAddr.tag, buff};
+                lines[it] <= {1'b1, 1'b0, total_hits + total_misses, curAddr.tag, buff};
             end else begin
                 total_hits++;
-                #3;
+                skip(5);
                 buff = lines[it].data;
-                lines[it] <= {lines[it].valid, lines[it].dirty, $time, lines[it].tag, buff};
+                lines[it] <= {lines[it].valid, lines[it].dirty, total_hits + total_misses, lines[it].tag, buff};
             end
 
-            owner_cpu <= 1;
             cmd_cpu <= C1_RESPONSE;
             for (j = 0; j < action_word; j += data1_bus_size) begin
                 for (i = 0; i + j < action_word && i < data1_bus_size; i++) begin
                     data_cpu[i * BITS_IN_BYTE +: BITS_IN_BYTE] <= buff[(curAddr.offset + j + i) * BITS_IN_BYTE +: BITS_IN_BYTE];
                 end
-                @(negedge clk);
+                if (j + data1_bus_size >= action_word) 
+                    @(posedge clk); // last iteration
+                else
+                    @(negedge clk);
             end
-
             owner_cpu <= 0;
         end
     end
 
     task run_mem_read(input logic[cache_set_size + cache_tag_size-1:0] addr_, output logic[cache_line_size*BITS_IN_BYTE-1:0] data_);
-        /* $monitor("time: %t %b %b %b", $time, cmd_mem, addr_mem, data_mem_w); */
         @(negedge clk);
         owner_mem <= 1;
         cmd_mem <= C2_READ_LINE;
         addr_mem <= addr_;
-        @(negedge clk);
+        @(posedge clk);
         owner_mem <= 0;
-        wait(cmd_mem_w == C2_RESPONSE);
-        @(negedge clk);
+        wait(cmd_mem_w == C2_RESPONSE); // on posedge
+        @(posedge clk);
         for (i = 0; i < cache_line_size; i += data2_bus_size) begin
             data_[i * BITS_IN_BYTE +: data2_bus_size * BITS_IN_BYTE] <= data_mem_w;
-            @(negedge clk);
+            if (i + data2_bus_size >= cache_line_size)
+                @(negedge clk);
+            else
+                @(posedge clk);
         end
         owner_mem <= 1;
         cmd_mem <= C2_NOP;

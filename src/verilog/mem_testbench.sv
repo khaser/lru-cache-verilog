@@ -10,62 +10,63 @@ module MemoryTestbench;
     logic[addr2_bus_size*BITS_IN_BYTE-1:0] addr;
     logic[data2_bus_size*BITS_IN_BYTE-1:0] data;
     bit owner = 1;
+    longint clk_time;
 
-    Clock clock(clk);
+    Clock clock(clk, clk_time);
     Memory #(64) mem(clk, reset, m_dump, addr_w, data_w, cmd_w);
 
     assign addr_w = addr;
     assign data_w = owner ? data : {data2_bus_size*BITS_IN_BYTE{1'bz}};
     assign cmd_w = owner ? cmd : 2'bzz;
 
-    integer it;
+    integer i;
 
     task run_read(input int addr_, output logic[cache_line_size*BITS_IN_BYTE-1:0] data_, output longint timing);
-        longint first_request;
         @(negedge clk);
-        first_request <= $time + 1;
         owner <= 1;
         cmd <= C2_READ_LINE;
         addr <= addr_;
-        @(negedge clk);
+        timing = clk_time;
+        @(posedge clk);
         owner <= 0;
-        wait(cmd_w == C2_RESPONSE);
-        timing <= $time - first_request;
-        @(negedge clk);
-        for (it = 0; it < cache_line_size; it += data2_bus_size) begin
-            data_[it * BITS_IN_BYTE +: data2_bus_size * BITS_IN_BYTE] <= data_w;
-            @(negedge clk);
+        wait(cmd_w == C2_RESPONSE); 
+        @(posedge clk);
+        timing = clk_time - timing;
+        for (i = 0; i < cache_line_size; i += data2_bus_size) begin
+            data_[i * BITS_IN_BYTE +: data2_bus_size * BITS_IN_BYTE] <= data_w;
+            if (i + data2_bus_size >= cache_line_size)
+                @(negedge clk);
+            else
+                @(posedge clk);
         end
         owner <= 1;
         cmd <= C2_NOP;
     endtask
 
     task run_write(input int addr_, input logic[cache_line_size*BITS_IN_BYTE-1:0] data_, output longint timing);
-        longint first_request;
         @(posedge clk);
-        first_request <= $time + 1;
+        timing = clk_time + 1;
         owner <= 1;
         cmd <= C2_WRITE_LINE;
         addr <= addr_;
-        for (it = 0; it < cache_line_size / data2_bus_size; it += 1) begin
-            data <= data_[it * data2_bus_size * BITS_IN_BYTE +: data2_bus_size * BITS_IN_BYTE];
+        for (i = 0; i < cache_line_size / data2_bus_size; i += 1) begin
+            data <= data_[i * data2_bus_size * BITS_IN_BYTE +: data2_bus_size * BITS_IN_BYTE];
             @(posedge clk);
         end
         owner <= 0;
         wait(cmd_w == C2_RESPONSE);
-        timing <= $time - first_request;
-        @(posedge clk);
+        timing = clk_time - timing;
         cmd <= C2_NOP;
         owner <= 1;
     endtask
 
     logic[cache_line_size * BITS_IN_BYTE - 1 : 0] buff_a, buff_b;
     longint timing = 100;
-    int test_addr = 5;
-    logic[cache_line_size * BITS_IN_BYTE - 1 : 0] test_payload = (1 << 16) + (1 << 8) + 1;
+    integer test_addr = 5;
+    logic[cache_line_size * BITS_IN_BYTE - 1 : 0] test_payload = {cache_line_size{$random()}};
 
     always @(timing)
-        if (timing != 100)
+        if (timing != mem_feedback_time)
             $display("Memory timing error! Expected: %d, Real %d", mem_feedback_time, timing);
 
     initial begin
@@ -90,5 +91,6 @@ module MemoryTestbench;
         end
 
         $display("Finish memory testing");
+        $finish;
     end
 endmodule

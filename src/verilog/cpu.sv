@@ -24,8 +24,9 @@ module CpuEmulator;
     assign cmd_cpu_w = owner_cpu ? cmd_cpu : 3'bzzz;
 
     integer total_hits, total_misses;
+    longint timing;
     
-    Clock cloker(clk);
+    Clock cloker(clk, timing);
     Memory mem(clk, reset, m_dump, addr_mem_w, data_mem_w, cmd_mem_w);
     Cache cache(clk, reset, c_dump, addr_cpu_w, data_cpu_w, cmd_cpu_w, addr_mem_w, data_mem_w, cmd_mem_w, total_hits, total_misses);
 
@@ -98,6 +99,16 @@ module CpuEmulator;
         cmd_cpu <= C1_NOP;
     endtask
 
+    task automatic skip(input longint ticks = 1);
+        logic enter_clk = clk;
+        /* while (ticks > 0) begin */
+        while (0) begin
+            wait(clk != enter_clk);
+            wait(clk == enter_clk);
+            ticks--;
+        end
+    endtask
+
     localparam M = 64;
     localparam N = 60;
     localparam K = 32;
@@ -113,42 +124,45 @@ module CpuEmulator;
     logic[2 * BITS_IN_BYTE-1:0] dbuff;
     logic[4 * BITS_IN_BYTE-1:0] qbuff;
 
-
     initial begin
         reset <= 1;
-        pa = a_addr; #1; // init pa
+        skip(); #1;
         reset <= 0;
-        pc = c_addr; #1; // init pc
+        skip();
+        pa = a_addr; skip(); // init pa
+        pc = c_addr; skip(); // init pc
 
-        #1; // y init;
-        for (y = 0; y < M; y++) begin //#1; // loop
-            #1; // x init;
-            for (x = 0; x < N; x++) begin #1; // loop
-                pb =#1 b_addr; // init pb
-                s =#1 0; // init s
-                #1; // k init;
-                for (k = 0; k < K; k++) begin #1; // loop
+        skip(); // y init;
+        for (y = 0; y < M; y++) begin skip(); // loop
+            skip(); // x init;
+            for (x = 0; x < N; x++) begin skip(); // loop
+                pb =b_addr; skip(); // init pb
+                s = 0; skip(); // init s
+                skip(); // k init;
+                for (k = 0; k < K; k++) begin skip(); // loop
                     // s += pa[k] * pb[x] begin
                     run_read(pa + k, C1_READ8, wbuff);
                     run_read(pb + x * 2, C1_READ16, dbuff);
-                    qbuff =#5 wbuff * dbuff; // (*)
-                    s =#1 s + qbuff; // (+)
+                    qbuff = wbuff * dbuff; skip(5); // (*)
+                    s = s + qbuff; skip(); // (+)
                     // s += pa[k] * pb[x] end
-                    pb =#1 pb + N * 2; // (+)
+                    pb = pb + N * 2; skip(); // (+)
                 end
                 run_write(pc + x * 4, C1_WRITE32, s);
             end
-            pa =#1 pa + K; // (+)
-            pc =#1 pc + N * 4; // (+)
-            $display("time: %d %t", y, $time);
+            pa = pa + K; skip(); // (+)
+            pc = pc + N * 4; skip(); // (+)
+            $display("time: %d %t", y, timing);
             $fflush;
         end
-        #1; // function exit
-        $display("Finish cpu run\n Time: %t\nTotal hits: %d\nTotal misses: %d", $time, total_hits, total_misses);
+        skip(); // function exit
+        $display("Finish cpu run\n Time: %t\nTotal hits: %d\nTotal misses: %d", timing, total_hits, total_misses);
         $finish;
-        /* Time:        5756380 */
-        /* Total hits:   228080 */
-        /* Total misses:  21520 */
+        /* Cache time:       4344220 */
+        /* Additional time:   998661 */
+        /* Total time:       5342881 */
+        /* Total hits:        228080 */
+        /* Total misses:       21520 */
     end
 endmodule
 `endif 

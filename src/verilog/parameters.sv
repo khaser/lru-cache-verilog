@@ -18,7 +18,7 @@ parameter addr2_bus_size = 2;
 
 parameter mem_feedback_time = 100;
 parameter cache_hit_time = 6;
-parameter cache_miss_time = 4;
+parameter cache_miss_time = 4 + mem_feedback_time + cache_line_size / data2_bus_size;
 
 parameter _SEED = 225526;
 
