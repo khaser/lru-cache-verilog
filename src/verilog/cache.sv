@@ -270,7 +270,7 @@ module CacheDriver
         input logic[BITS_IN_BYTE*cache_line_size - 1:0] data,
         output longint timing
     );
-        $monitor("time %t, owner: %b, clk: %b cmd_w: %b addr_w: %b data_w: %b", clk_time, owner_cpu, clk, cmd_cpu_w, addr_cpu_w, data_cpu_w);
+        /* $monitor("time %t, owner: %b, clk: %b cmd_w: %b addr_w: %b data_w: %b", clk_time, owner_cpu, clk, cmd_cpu_w, addr_cpu_w, data_cpu_w); */
         @(negedge clk);
         timing = clk_time;
         cmd_cpu <= cmd;
