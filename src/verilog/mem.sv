@@ -53,19 +53,19 @@ module Memory
 
     integer it, byte_in_bus;
 
-    always @(negedge clk) begin
+    always @(posedge clk) begin
         if (cmd_w == C2_WRITE_LINE) begin
             for (it = addr * cache_line_size; it < addr * cache_line_size + cache_line_size; it += data2_bus_size) begin
                 for (byte_in_bus = 0; byte_in_bus < data2_bus_size; byte_in_bus += 1) begin
                     heap[it + byte_in_bus] <= data_w[byte_in_bus * BITS_IN_BYTE +: BITS_IN_BYTE];
                 end
-                @(negedge clk);
+                @(posedge clk);
             end
-            skip(mem_feedback_time - cache_line_size / data2_bus_size);
-            @(posedge clk);
+            skip(mem_feedback_time - cache_line_size / data2_bus_size - 1);
+            @(negedge clk);
             cmd <= C2_RESPONSE;
             owner <= 1;
-            @(negedge clk);
+            @(posedge clk);
             owner <= 0;
         end
     end
@@ -136,14 +136,14 @@ module MemoryDriver
     endtask
 
     task run_write(input int addr_, input logic[cache_line_size*BITS_IN_BYTE-1:0] data_, output longint timing);
-        @(posedge clk);
-        timing = clk_time + 1;
+        @(negedge clk);
+        timing = clk_time;
         owner <= 1;
         cmd <= C2_WRITE_LINE;
         addr <= addr_;
         for (i = 0; i < cache_line_size / data2_bus_size; i += 1) begin
             data <= data_[i * data2_bus_size * BITS_IN_BYTE +: data2_bus_size * BITS_IN_BYTE];
-            @(posedge clk);
+            @(negedge clk);
         end
         owner <= 0;
         wait(cmd_w == C2_RESPONSE);

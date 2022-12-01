@@ -195,7 +195,7 @@ module Cache (
             cmd_cpu <= C1_RESPONSE;
             for (j = 0; j < action_word; j += data1_bus_size) begin
                 for (i = 0; i + j < action_word && i < data1_bus_size; i++) begin
-                    data_cpu[i * BITS_IN_BYTE +: BITS_IN_BYTE] <= buff[(curAddr.offset + j + i) * BITS_IN_BYTE +: BITS_IN_BYTE];
+                    data_cpu[i * BITS_IN_BYTE +: BITS_IN_BYTE] = buff[(curAddr.offset + j + i) * BITS_IN_BYTE +: BITS_IN_BYTE];
                 end
                 if (j + data1_bus_size >= action_word) 
                     @(posedge clk); // last iteration
@@ -243,6 +243,7 @@ module CacheDriver
         @(posedge clk);
         owner_cpu <= 0;
         wait(cmd_cpu_w == C1_RESPONSE); // response on posedge!
+        /* @(posedge clk); */
         timing = clk_time - timing;
         case (cmd) 
             C1_READ8, C1_READ16 : begin
@@ -269,7 +270,7 @@ module CacheDriver
         input logic[BITS_IN_BYTE*cache_line_size - 1:0] data,
         output longint timing
     );
-        /* $monitor("time: %t, owner: %b, clk: %b cmd_w: %b addr_w: %b data_w: %b", clk_time, owner_cpu, clk, cmd_cpu_w, addr_cpu_w, data_cpu_w); */
+        $monitor("time %t, owner: %b, clk: %b cmd_w: %b addr_w: %b data_w: %b", clk_time, owner_cpu, clk, cmd_cpu_w, addr_cpu_w, data_cpu_w);
         @(negedge clk);
         timing = clk_time;
         cmd_cpu <= cmd;
