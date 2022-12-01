@@ -42,6 +42,7 @@ jobs:
       - name: build_ubuntu
         id: build_ubuntu
         run: |  
+          cd src/verilog
           iverilog -g2012 -o testbench.out testbench.sv > log.txt 2>&1
           echo "bec=\"$(echo $?)\"" >> $GITHUB_OUTPUT
           log=$(cat log.txt)
