@@ -71,6 +71,7 @@ jobs:
       - name: test_ubuntu
         id: test_ubuntu
         run: |  
+          cd src/verilog
           log=$(vvp testbench.out)
           log="${log//'%'/'%25'}"
           #log="${log//$'\n'/'\\'}"
