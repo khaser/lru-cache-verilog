@@ -35,7 +35,7 @@
 \newcommand\abs[1]{\left|#1\right|}
 \definecolor{bg}{rgb}{0.95, 0.95, 0.95}
 \newminted{cpp}{ fontsize=\scriptsize, bgcolor=bg, breakafter=, breaklines, breakautoindent=true, breaksymbolleft=\raisebox{0.8ex}{ \small\reflectbox{\carriagereturn}}, breaksymbolright=\small\carriagereturn, }
-\newminted{sv}{ fontsize=\scriptsize, bgcolor=bg, breakafter=, breaklines, breakautoindent=true, breaksymbolleft=\raisebox{0.8ex}{ \small\reflectbox{\carriagereturn}}, breaksymbolright=\small\carriagereturn, }
+\newminted{sv}{ fontsize=\small, bgcolor=bg, breakafter=, breaklines, breakautoindent=true, breaksymbolleft=\raisebox{0.8ex}{ \small\reflectbox{\carriagereturn}}, breaksymbolright=\small\carriagereturn, }
 
 \newmintedfile{cpp}{linenos, fontsize=\scriptsize, bgcolor=bg, breaklines, breakafter=,}
 \newmintedfile{sv}{linenos,fontsize=\scriptsize, bgcolor=bg, breakafter=, breaklines, breakautoindent=true, breaksymbolleft=\raisebox{0.8ex}{ \small\reflectbox{\carriagereturn}}, breaksymbolright=\small\carriagereturn, }
@@ -279,6 +279,7 @@ struct CacheLine {
 вытесняемый кэш линий, которые необходимо записать в память.
 Эта информация пригодится для работы других классов.
 \begin{cppcode}
+
 struct CacheSet {
 private:
     vector<CacheLine> lines;
@@ -289,15 +290,17 @@ public:
         lines = vector<CacheLine>(way, CacheLine{line_size});
     }
 
-    bool read(Addr tag, int call) {
+    bool exists(Addr tag) {
+        return find_by_tag(tag) != lines.end();
+    } 
+
+    void read(Addr tag, int call) {
         auto it = find_by_tag(tag);
         if (it != lines.end()) {
             it->last_call = call;
         } else {
-            total_mem_pushes += find_LRO()->dirty;
             *(find_LRO()) = CacheLine {line_size, 1, 0, tag, call};
         }
-        return it != lines.end(); 
     }
 
     void write(Addr tag, int call) {
@@ -329,6 +332,7 @@ private:
         });
     }
 };
+
 \end{cppcode}
 
 Теперь можно перейти к самому сложному классу~--- Cache. Он
@@ -400,30 +404,33 @@ public:
     void read(Word word, Addr addr) {
         calls++;
         auto [tag, set, offset] = split_addr(addr); 
-        if (sets[set].read(tag, calls)) {
+        if (sets[set].exists(tag)) {
             total_hits++;
             total_time += 6; // Cache lag
-            total_time += transfer_lag(word); // Cache -> Cpu
+            total_time += transfer_lag(word) + 1; // Cache -> Cpu
+                                                  // 8-9
         } else {
             total_misses++;
             total_time += 4 + 100; // Cache + Mem lag
-            total_time += transfer_lag(WORD * line_size); // Mem -> Cache
+            total_time += transfer_lag(WORD * line_size) + 1; // Mem -> Cache
             total_time += transfer_lag(word); // Cache -> Cpu
+                                              // 114-115
         }
+        sets[set].read(tag, calls);
     };
 
     void write(Word word, Addr addr) {
         calls++;
         auto [tag, set, offset] = split_addr(addr); 
-        if (sets[set].read(tag, calls)) {
+        if (sets[set].exists(tag)) {
             total_hits++;
             total_time += 6; // Cache lag 
             total_time += 1; // Cache->Cpu response
         } else {
             total_misses++;
-            total_time += 4 + 100; // Cache + Mem lag
+            total_time += 4 + 100;                        // Cache + Mem lag
             total_time += transfer_lag(WORD * line_size); // Mem -> Cache
-            total_time += 1;  // Cache -> Cpu response
+            total_time += 1; // Cache->Cpu response
         }
         sets[set].write(tag, calls);
     };
@@ -442,7 +449,7 @@ public:
                 return acc + el.getMemPushes();
             }
         );
-        return total_time + total_pushes * transfer_lag(WORD * line_size);
+        return total_time + total_pushes * (100 + 1);
     }
 
 private:
@@ -515,9 +522,9 @@ int main() {
 \end{cppcode}
 Ниже приведён вывод данного кода:\\
 \texttt{
-HITS: 228080 \\
-MISSES: 21520 \\
-TOTAL TIME: 4042224\\
+HITS: 228080\\
+MISSES: 21520\\
+TOTAL TIME: 4274080\\
 RATE: 0.913782\\
 }
 Теперь, когда мы знаем за сколько работает кэш, вычислим время
@@ -545,8 +552,42 @@ RATE: 0.913782\\
 $998660 + 4042224 = 5040884$
 
 \section*{ Моделирование на языке Verilog }
-Прежде всего, необходимо уточнить, как в моём коде
-реализованы inout шины на Verilog. Для примера
+\subsection*{ Структура проекта }
+Стоит начать с общей структуры модели и с её организации на
+файлы. Логически есть 3 модуля: процессор, кэш и память,
+причём процессор в нашем случае не в виде схемы,
+а в виде тестового окружения на Verilog, который лишь 
+симулирует работу настоящего процессора для кэша.
+Помимо основных модулей, есть ещё вспомогательные: 
+\begin{itemize}
+    \item 
+        \texttt{parameters.sv} для описания глобальных констант
+        и структур.
+    \item
+        \texttt{clock.sv} в котором объявляется
+        модуль \texttt{Clock}, который используется
+        для синхронизации схем и оценки времени их работы, так как
+        внутри себя он считает количество тактов.
+    \item 
+        \texttt{mem\_testbench.sv} и \texttt{cache\_testbench.sv}
+        это что-то вроде Unit тестов для памяти и кэша соответственно.
+        Помимо корректности, они проверяют ещё и время работы 
+        того или иного модуля в различных ситуациях.
+\end{itemize}
+Для подключения модулей используется директива \mintinline{sv}{include}, работающая
+аналогично одноимённой директиве в C и имеющая те же проблемы: а именно
+множественный include одного и того-же модуля и, как следствие,
+ошибка компиляции. В Verilog эта проблема решается точно
+так как, как и в C, при помощи так называемых include guards.
+\begin{svcode}
+`ifndef CPU_GUARD
+`define CPU_GUARD
+...
+`endif
+\end{svcode}
+
+\subsection*{ Inout шины }
+Поясним, как реализованы inout шины на Verilog. Для примера
 возьмём часть кода из файла \texttt{mem.sv}, в которой
 реализована шина адреса \texttt{cmd\_w}.
 \begin{svcode}
@@ -579,72 +620,59 @@ module Memory
 которые могут реальной схеме даже привести к короткому замыканию
 и натурально поджарить нашу схему.
 
-Вторым пунктом, я хочу отметить, что размер шин адреса 
-\var{addr1_bus_size} и \var{addr2_bus_size} у меня округлены
-с 15 бит до 16, для того, чтобы все шины единообразно
-задавались целым количеством байт, мне кажется это немного
-упростило внутренний код модулей. 
+Отдельно хочу отметить, что размер шин адреса 
+\var{addr1_bus_size} и\\ \var{addr2_bus_size} в моей реализации
+округлены с 15 бит до 16, для того, чтобы все шины единообразно
+задавались целым количеством байт, мне кажется это достаточно
+логичным.
+\subsection*{ Функция skip }
+Почти в каждом модуле можно видеть следующую функцию, которая
+необходима для удобного программирования схемы.
+\begin{svcode}
+    task automatic skip(input longint ticks = 1);
+        logic enter_clk = clk;
+        while (ticks > 0) begin
+            wait(clk != enter_clk);
+            wait(clk == enter_clk);
+            ticks--;
+        end
+    endtask
+\end{svcode}
+Стоит отметить, что очень важным является то, что она
+ждёт не posedge\slash negedge, а именно такт, то есть
+данная функция не меняет чётности синхронизации. Это
+очень важно и много где используется.
+К сожалению, я не нашёл и не придумал способа не дублировать
+её код в каждом из модулей, так как если передавать clk по\\
+\mintinline{sv}{input logic clk} аргумент, то он не будет
+обновляться внутри этой функции. Действительно в стандарте
+SystemVerilog на этот случай есть \mintinline{sv}{ref logic clk},
+что делало ровно то, что нам надо, но эта конструкция не 
+поддерживается в \texttt{Icarus Verilog 11}, поэтому от
+её использования пришлось отказаться. 
 
-Давайте на примере команды \var{C2_WRITE_LINE}
-отправленной от кэша памяти
-рассмотрим как происходит синхронизация между двумя схемами.
-Основная идея по синхронизации схем: память отрабатывает
-во время, когда такт синхронизации 0, то есть после 
-\mintinline{sv}{negedge clk}, а кэш~--- наоборот
-во время синхронизации 1, то есть после
-\mintinline{sv}{posedge clk}. Эти меры позволяют схеме
-работать максимально предсказуемо и писать код с меньшим
-количеством ошибок. Но это имеет и свои минусы.
-Самый главный из них это не очевидная оценка работы из-за
-следующего эффекта. Допустим кэш хочет начать считывание
-из оперативной памяти. Первым делом, он ждёт события
-\mintinline{sv}{posedge clk} и вот тут начинается проблема.
-В зависимости от состояния синхронизации один такт может 
-пропасть просто на ничего не деланье. Поэтому оценка времени
-работы либо должна это учитывать, что не так просто, так как
-надо по-честному знать время исполнение каждой 
-команды, либо смириться с тем, что у нас есть ошибка
-в среднем в половину такта при каждом обращении к памяти.
-Вторая проблема, возникающая из-за строгих привязок к 
-posedge\slash backedge это выставление внутренних задержек
-внутри модуля. А именно, если внутри памяти выставить задержку
-в один такт, то она не окажет никакого эффекта, так как 
-этот такт всё равно она прождёт, во время синхронизации. 
+\subsection*{ Про выравнивания структур }
 
-\textbf{И тут нам подвинули дедлайн и я решил всё таки сделать clk нормально.}
-А именно, если раньше за такт считалось время, на 
-протяжении которого clk удерживал одно и то же значение, то теперь
-за один такт взято расстояние от одного \mintinline{sv}{posedge clk} до следующего.
-это полностью решает описанные выше проблемы с чётностью\slash нечётностью
-такта. В истории git можно посмотреть внесённые для этого
-перехода изменения. 
-
-
+\subsection*{ Решение проблемы записи в структуру }
+Из-за особенностей Verilog .
 
 \section*{ Воспроизведение задачи на Verilog }
 
 \section*{ Сравнение полученных результатов }
-Заметим, что время работы достаточно отличается от
-прогнозированного чуть меньше, чем на 20\%, 
-я могу выделить несколько основных причин, почему это произошло. 
+Изначально прогнозированное время работы было меньше реально примерно на 20\%.
+Это произошло главным образом из-за плохой реализации передачи данных по шине. 
 
-\begin{itemize}
-    \item 
-        Код на C++ писался до кода на Verilog и количество
-        тактов, которое будет уходить на передачу тех или
-        иных данных было спрогнозировано достаточно недостаточно точно.
-        Например изначально не было учтены такты необходимые
-        на передачу владения шиной от одного модуля к другому. 
-        Можно думать, что при каждом обращении к кэшу есть
-        ошибка в среднем в один такт.
-    \item
-        В коде на Verilog много где сформирована модель, что
-        принимающая сторона синхронизируется по \mintinline{sv}{posedge clk},
-        а отдающая по \mintinline{sv}{negedge clk} или наоборот.
-        Из-за этого очередная операция считывания может быть начата
-        на такт позже из-за того, что на данном такте \mintinline{sv}{negedge clk},
-        а эта схема синхронизируется по \mintinline{sv}{posedge clk} перед отправкой.
-\end{itemize}
+В коде на Verilog много где была сформирована модель, что
+принимающая сторона синхронизируется по \mintinline{sv}{posedge clk},
+а отдающая по \mintinline{sv}{negedge clk} или наоборот.
+Из-за этого очередная операция считывания могла быть начата
+на такт позже из-за того, что на данном такте \mintinline{sv}{negedge clk},
+а эта схема синхронизируется по \mintinline{sv}{posedge clk} перед отправкой.
+
+Но описанная выше проблема была исправлена после исправления не оптимальных мест
+и изменения логики синхронизации. После этих изменений, время, полученное во время
+симуляции кода на Verilog в точности совпало с прогнозом.
+
 \section*{ Листининг кода }
 \subsection*{ Код на C++ для оценки времени работы }
 \begin{code}
