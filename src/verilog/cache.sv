@@ -25,13 +25,15 @@ module Cache (
     assign data_cpu_w = owner_cpu ? data_cpu : {data1_bus_size*BITS_IN_BYTE{1'bz}};
     assign cmd_cpu_w = owner_cpu ? cmd_cpu : 3'bzzz;
 
-    bit owner_mem = 1;
-    logic[addr2_bus_size*BITS_IN_BYTE-1:0] addr_mem;
-    logic[data2_bus_size*BITS_IN_BYTE-1:0] data_mem;
-    logic[1:0] cmd_mem = C2_NOP;
-    assign addr_mem_w = addr_mem;
-    assign data_mem_w = owner_mem ? cmd_mem : {data2_bus_size*BITS_IN_BYTE{1'bz}};
-    assign cmd_mem_w = owner_mem ? cmd_mem : 2'bzz;
+    MemoryDriver mem_driver(clk, 64'b0, reset, 1'b0, addr_mem_w, data_mem_w, cmd_mem_w);
+
+    /* bit owner_mem = 1; */
+    /* logic[addr2_bus_size*BITS_IN_BYTE-1:0] addr_mem; */
+    /* logic[data2_bus_size*BITS_IN_BYTE-1:0] data_mem; */
+    /* logic[1:0] cmd_mem = C2_NOP; */
+    /* assign addr_mem_w = addr_mem; */
+    /* assign data_mem_w = owner_mem ? cmd_mem : {data2_bus_size*BITS_IN_BYTE{1'bz}}; */
+    /* assign cmd_mem_w = owner_mem ? cmd_mem : 2'bzz; */
 
     typedef struct packed { 
         logic valid;
@@ -166,19 +168,8 @@ module Cache (
     endfunction
 
     task run_mem_write(input logic[cache_set_size + cache_tag_size-1:0] addr_, input logic[cache_line_size*BITS_IN_BYTE-1:0] data_);
-        @(posedge clk);
-        owner_mem <= 1;
-        cmd_mem <= C2_WRITE_LINE;
-        addr_mem <= addr_;
-        for (i = 0; i <= cache_line_size / data2_bus_size; i += 1) begin
-            data_mem <= data_[i * data2_bus_size * BITS_IN_BYTE +: data2_bus_size * BITS_IN_BYTE];
-            @(posedge clk);
-        end
-        owner_mem <= 1;
-        wait(cmd_mem_w == C2_RESPONSE);
-        @(posedge clk);
-        cmd_mem <= C2_NOP;
-        owner_mem <= 1;
+        longint timing; // Unusable blackhole
+        mem_driver.run_write(addr_, data_, timing);
     endtask
 
     logic[cache_line_size * BITS_IN_BYTE-1:0] buff;
@@ -225,23 +216,8 @@ module Cache (
     end
 
     task run_mem_read(input logic[cache_set_size + cache_tag_size-1:0] addr_, output logic[cache_line_size*BITS_IN_BYTE-1:0] data_);
-        @(negedge clk);
-        owner_mem <= 1;
-        cmd_mem <= C2_READ_LINE;
-        addr_mem <= addr_;
-        @(posedge clk);
-        owner_mem <= 0;
-        wait(cmd_mem_w == C2_RESPONSE); // on posedge
-        @(posedge clk);
-        for (i = 0; i < cache_line_size; i += data2_bus_size) begin
-            data_[i * BITS_IN_BYTE +: data2_bus_size * BITS_IN_BYTE] <= data_mem_w;
-            if (i + data2_bus_size >= cache_line_size)
-                @(negedge clk);
-            else
-                @(posedge clk);
-        end
-        owner_mem <= 1;
-        cmd_mem <= C2_NOP;
+        longint timing; // Unusable blackhole
+        mem_driver.run_read(addr_, data_, timing);
     endtask
     
 endmodule

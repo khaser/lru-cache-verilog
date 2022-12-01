@@ -115,6 +115,7 @@ module CacheTestbench;
 
         begin : TEST_CACHE_HITS
             resetCache();
+            run_read(0, C1_READ8, buff, timing);
             if (timing != cache_miss_time) 
                 $display("Cache read-miss timing error! Expected: %d, Real %d", cache_miss_time, timing);
             for (i = 1; i < 32; ++i) begin

@@ -89,6 +89,68 @@ module Memory
             owner <= 0;
         end
     end
+endmodule
+
+module MemoryDriver
+    (
+        input logic clk, 
+        input longint clk_time, 
+        input logic reset, 
+        input logic m_dump,
+        output logic[addr2_bus_size*BITS_IN_BYTE-1:0] addr_w,
+        inout logic[data2_bus_size*BITS_IN_BYTE-1:0] data_w,
+        inout logic[1:0] cmd_w
+    );
+
+    logic[1:0] cmd = C2_NOP;
+    logic[addr2_bus_size*BITS_IN_BYTE-1:0] addr;
+    logic[data2_bus_size*BITS_IN_BYTE-1:0] data;
+    bit owner = 1;
+
+    assign cmd_w = owner ? cmd : 2'bzz;
+    assign addr_w = addr;
+    assign data_w = owner ? data : {data2_bus_size*BITS_IN_BYTE{1'bz}};
+
+    integer i;
+
+    task run_read(input logic[cache_set_size + cache_tag_size-1:0] addr_, output logic[cache_line_size*BITS_IN_BYTE-1:0] data_, output longint timing);
+        @(negedge clk);
+        owner <= 1;
+        cmd <= C2_READ_LINE;
+        addr <= addr_;
+        timing = clk_time;
+        @(posedge clk);
+        owner <= 0;
+        wait(cmd_w == C2_RESPONSE); 
+        @(posedge clk);
+        timing = clk_time - timing;
+        for (i = 0; i < cache_line_size; i += data2_bus_size) begin
+            data_[i * BITS_IN_BYTE +: data2_bus_size * BITS_IN_BYTE] <= data_w;
+            if (i + data2_bus_size >= cache_line_size)
+                @(negedge clk);
+            else
+                @(posedge clk);
+        end
+        owner <= 1;
+        cmd <= C2_NOP;
+    endtask
+
+    task run_write(input int addr_, input logic[cache_line_size*BITS_IN_BYTE-1:0] data_, output longint timing);
+        @(posedge clk);
+        timing = clk_time + 1;
+        owner <= 1;
+        cmd <= C2_WRITE_LINE;
+        addr <= addr_;
+        for (i = 0; i < cache_line_size / data2_bus_size; i += 1) begin
+            data <= data_[i * data2_bus_size * BITS_IN_BYTE +: data2_bus_size * BITS_IN_BYTE];
+            @(posedge clk);
+        end
+        owner <= 0;
+        wait(cmd_w == C2_RESPONSE);
+        timing = clk_time - timing;
+        cmd <= C2_NOP;
+        owner <= 1;
+    endtask
 
 endmodule
 `endif 
