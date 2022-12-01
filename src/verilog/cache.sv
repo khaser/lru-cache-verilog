@@ -27,13 +27,15 @@ module Cache (
 
     MemoryDriver mem_driver(clk, 64'b0, reset, 1'b0, addr_mem_w, data_mem_w, cmd_mem_w);
 
-    /* bit owner_mem = 1; */
-    /* logic[addr2_bus_size*BITS_IN_BYTE-1:0] addr_mem; */
-    /* logic[data2_bus_size*BITS_IN_BYTE-1:0] data_mem; */
-    /* logic[1:0] cmd_mem = C2_NOP; */
-    /* assign addr_mem_w = addr_mem; */
-    /* assign data_mem_w = owner_mem ? cmd_mem : {data2_bus_size*BITS_IN_BYTE{1'bz}}; */
-    /* assign cmd_mem_w = owner_mem ? cmd_mem : 2'bzz; */
+    task run_mem_write(input logic[cache_set_size + cache_tag_size-1:0] addr_, input logic[cache_line_size*BITS_IN_BYTE-1:0] data_);
+        longint timing; // Unusable blackhole
+        mem_driver.run_write(addr_, data_, timing);
+    endtask
+
+    task run_mem_read(input logic[cache_set_size + cache_tag_size-1:0] addr_, output logic[cache_line_size*BITS_IN_BYTE-1:0] data_);
+        longint timing; // Unusable blackhole
+        mem_driver.run_read(addr_, data_, timing);
+    endtask
 
     typedef struct packed { 
         logic valid;
@@ -53,15 +55,9 @@ module Cache (
 
     function int bytes_cnt_from_cmd(logic[2:0] cmd);
         case (cmd & 3'b011) 
-            3'b001 : begin
-                return 1;
-            end
-            3'b010 : begin
-                return 2;
-            end
-            3'b011 : begin
-                return 4;
-            end
+            3'b001 : return 1;
+            3'b010 : return 2;
+            3'b011 : return 4;
         endcase
     endfunction
 
@@ -166,12 +162,7 @@ module Cache (
         end
         return it;
     endfunction
-
-    task run_mem_write(input logic[cache_set_size + cache_tag_size-1:0] addr_, input logic[cache_line_size*BITS_IN_BYTE-1:0] data_);
-        longint timing; // Unusable blackhole
-        mem_driver.run_write(addr_, data_, timing);
-    endtask
-
+    
     logic[cache_line_size * BITS_IN_BYTE-1:0] buff;
     always @(posedge clk) begin
         if (owner_cpu == 0 && (cmd_cpu_w == C1_READ8 || cmd_cpu_w == C1_READ16 || cmd_cpu_w == C1_READ32)) begin
@@ -215,11 +206,98 @@ module Cache (
         end
     end
 
-    task run_mem_read(input logic[cache_set_size + cache_tag_size-1:0] addr_, output logic[cache_line_size*BITS_IN_BYTE-1:0] data_);
-        longint timing; // Unusable blackhole
-        mem_driver.run_read(addr_, data_, timing);
-    endtask
-    
 endmodule
 
+module CacheDriver
+    (
+        input logic clk, 
+        input longint clk_time,
+        input logic reset,
+        input logic c_dump,
+        output logic[addr1_bus_size*BITS_IN_BYTE-1:0] addr_cpu_w,
+        inout logic[data1_bus_size*BITS_IN_BYTE-1:0] data_cpu_w,
+        inout logic[2:0] cmd_cpu_w
+    );
+
+    bit owner_cpu = 1;
+    logic[2:0] cmd_cpu = C1_NOP;
+    logic[addr1_bus_size*BITS_IN_BYTE-1:0] addr_cpu;
+    logic[data1_bus_size*BITS_IN_BYTE-1:0] data_cpu;
+    assign addr_cpu_w = addr_cpu;
+    assign data_cpu_w = owner_cpu ? data_cpu : {data1_bus_size*BITS_IN_BYTE{1'bz}};
+    assign cmd_cpu_w = owner_cpu ? cmd_cpu : 3'bzzz;
+
+    task run_read(
+        input logic[cache_tag_size + cache_offset_size + cache_set_size - 1 : 0] addr,
+        input logic[2:0] cmd,
+        output logic[BITS_IN_BYTE*cache_line_size-1:0] data,
+        output longint timing
+    );
+        logic[BITS_IN_BYTE*data1_bus_size-1:0] local_buff;
+        @(negedge clk);
+        timing = clk_time;
+        cmd_cpu <= cmd;
+        addr_cpu <= addr[cache_offset_size +: cache_set_size + cache_tag_size];
+        @(negedge clk);
+        addr_cpu <= addr[0 +: cache_offset_size];
+        @(posedge clk);
+        owner_cpu <= 0;
+        wait(cmd_cpu_w == C1_RESPONSE); // response on posedge!
+        timing = clk_time - timing;
+        case (cmd) 
+            C1_READ8, C1_READ16 : begin
+                data = data_cpu_w;
+            end
+            C1_READ32 : begin
+                local_buff <= data_cpu_w;
+                @(posedge clk);
+                data = {data_cpu_w[0 +: data1_bus_size*BITS_IN_BYTE], local_buff[0 +: data1_bus_size*BITS_IN_BYTE]};
+            end
+            default : begin
+                $display("Incorrect run_read cmd: %d", cmd);
+                $finish;
+            end
+        endcase
+        owner_cpu <= 1;
+        cmd_cpu <= C1_NOP;
+        @(negedge clk);
+    endtask
+
+    task run_write(
+        input logic[cache_tag_size + cache_offset_size + cache_set_size - 1 : 0] addr,
+        input logic[2:0] cmd,
+        input logic[BITS_IN_BYTE*cache_line_size - 1:0] data,
+        output longint timing
+    );
+        /* $monitor("time: %t, owner: %b, clk: %b cmd_w: %b addr_w: %b data_w: %b", clk_time, owner_cpu, clk, cmd_cpu_w, addr_cpu_w, data_cpu_w); */
+        @(negedge clk);
+        timing = clk_time;
+        cmd_cpu <= cmd;
+        addr_cpu <= addr[cache_offset_size +: cache_set_size + cache_tag_size];
+        @(negedge clk);
+        addr_cpu <= addr[0 +: cache_offset_size];
+        case (cmd) 
+            C1_WRITE8, C1_WRITE16 : begin
+                data_cpu <= data;
+            end
+            C1_WRITE32 : begin
+                data_cpu <= data[0 +: data1_bus_size * BITS_IN_BYTE];
+                @(negedge clk);
+                data_cpu <= data[data1_bus_size*BITS_IN_BYTE +: data1_bus_size*BITS_IN_BYTE];
+            end
+            default : begin
+                $display("Incorrect run_write cmd: %d", cmd);
+                $finish;
+            end
+        endcase
+        @(posedge clk);
+        owner_cpu <= 0;
+        @(negedge clk); // ???
+        wait(cmd_cpu_w == C1_RESPONSE);
+        timing = clk_time - timing;
+        owner_cpu <= 1;
+        cmd_cpu <= C1_NOP;
+    endtask
+
+endmodule
 `endif
