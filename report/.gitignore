@@ -4,7 +4,6 @@ main.fdb_latexmk
 main.log
 main.toc
 main.out
-main.pdf
 main.pyg
 main.synctex.gz
 _minted-main/*
